@@ -38,6 +38,7 @@ cd esp-idf
 source ~/esp/esp-idf/export.sh
 ```
 注意：每次打开新终端都需要先激活ESP-IDF开发环境才可以编译ESP-IDF的工程。看到如下信息则表示激活成功
+
 ![激活成功示例](./image/1.png)
 
 ## 编译和烧录固件
@@ -53,11 +54,13 @@ idf.py menuconfig
 ### 2. 打开micro-ROS Settings
 
 在micro-ROS Agent IP填入代理主机的IP地址(这里填树莓派接入wifi后的真实IP地址)，在micro-ROS Agent Port填入代理主机的端口号（默认8090，可选其他端口）
+
 ![IP设置](./image/2.png)
 
 ### 3. wifi设置
 
 依次打开micro-ROS Settings->WiFi Configuration，在WiFi SSID和WiFi Password这两栏填入WiFi名称和密码。
+
 ![wifi设置](./image/3.png)
 
 打开micro-ROS example-app settings，Ros domain id of the micro-ROS为5，如果局域网内有多用户同时使用的情况，可修改参数以避免冲突。Ros namespace of the micro-ROS默认为空，正常情况下可以不修改，如果修改非空字符（10个字符以内），则会在节点和话题前加上namespace参数。
