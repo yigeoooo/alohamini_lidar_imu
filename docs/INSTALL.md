@@ -58,7 +58,7 @@ docker pull --platform linux/arm64/v8 docker.io/library/ros:humble-ros-base-jamm
 
 ```text
 docker.io/microros/micro-ros-agent:humble  接收 ESP32 / micro-ROS 发布的 /scan 和 /imu
-docker.io/library/ros:humble-ros-base-jammy  手工安装 Nav2、SLAM Toolbox、bridge 和 RViz 依赖的基础容器
+docker.io/library/ros:humble-ros-base-jammy  手工安装 Nav2、SLAM Toolbox 和 bridge 运行依赖的基础容器
 ```
 
 如果树莓派访问 Docker Hub 慢，可以在网络更好的电脑上拉 arm64 镜像并导出：

@@ -14,7 +14,7 @@ menu "micro-ROS example-app settings"
 
     config MICRO_ROS_DOMAIN_ID
         int "Ros domain id of the micro-ROS"
-        default 20
+        default 5
         range 0 101
         help
         To avoid interference between different groups of computers running ROS 2 on the same network, set a different domain ID value for each computer group.
