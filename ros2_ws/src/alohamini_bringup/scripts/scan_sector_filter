@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import math
+
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan
+
+
+def as_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+class ScanSectorFilter(Node):
+    def __init__(self) -> None:
+        super().__init__("scan_sector_filter")
+        self.declare_parameter("input_topic", "/scan")
+        self.declare_parameter("output_topic", "/scan_filtered")
+        self.declare_parameter("min_angle", -math.pi / 2.0)
+        self.declare_parameter("max_angle", math.pi / 2.0)
+        self.declare_parameter("use_nan", False)
+
+        self.input_topic = self.get_parameter("input_topic").value
+        self.output_topic = self.get_parameter("output_topic").value
+        self.min_angle = float(self.get_parameter("min_angle").value)
+        self.max_angle = float(self.get_parameter("max_angle").value)
+        self.replacement = math.nan if as_bool(self.get_parameter("use_nan").value) else math.inf
+
+        self.publisher = self.create_publisher(LaserScan, self.output_topic, 10)
+        self.subscription = self.create_subscription(LaserScan, self.input_topic, self.on_scan, 10)
+        self.get_logger().info(
+            f"Filtering {self.input_topic} -> {self.output_topic}; "
+            f"keeping angles [{self.min_angle:.3f}, {self.max_angle:.3f}] rad"
+        )
+
+    def keep_angle(self, angle: float) -> bool:
+        if self.min_angle <= self.max_angle:
+            return self.min_angle <= angle <= self.max_angle
+        return angle >= self.min_angle or angle <= self.max_angle
+
+    def on_scan(self, msg: LaserScan) -> None:
+        filtered = LaserScan()
+        filtered.header = msg.header
+        filtered.angle_min = msg.angle_min
+        filtered.angle_max = msg.angle_max
+        filtered.angle_increment = msg.angle_increment
+        filtered.time_increment = msg.time_increment
+        filtered.scan_time = msg.scan_time
+        filtered.range_min = msg.range_min
+        filtered.range_max = msg.range_max
+
+        ranges = []
+        intensities = []
+        has_intensities = len(msg.intensities) == len(msg.ranges)
+        for index, value in enumerate(msg.ranges):
+            angle = msg.angle_min + index * msg.angle_increment
+            if self.keep_angle(angle):
+                ranges.append(value)
+                if has_intensities:
+                    intensities.append(msg.intensities[index])
+            else:
+                ranges.append(self.replacement)
+                if has_intensities:
+                    intensities.append(0.0)
+
+        filtered.ranges = ranges
+        filtered.intensities = intensities if has_intensities else list(msg.intensities)
+        self.publisher.publish(filtered)
+
+
+def main(args=None) -> None:
+    rclpy.init(args=args)
+    node = ScanSectorFilter()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,376 @@
+#!/usr/bin/env python3
+"""Interactive AlohaMini mapping session helper.
+
+This wrapper starts mapping.launch.py and provides keyboard teleop controls:
+  w/s: forward/backward
+  z/x: left/right strafe
+  a/d: rotate left/right
+  r/f: speed up/down
+  Space: stop and publish zero /cmd_vel
+  Shift+S: save the current map and keep mapping
+  Shift+X: save the current map, then stop mapping.launch.py
+  q: stop mapping.launch.py without saving
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+import select
+import signal
+import subprocess
+import sys
+import termios
+import time
+import tty
+
+from geometry_msgs.msg import Twist
+import rclpy
+
+
+# Conservative mapping speeds. The ROS mapping helper keeps lower speeds than
+# full manual teleop while building a map close to obstacles.
+SPEED_LEVELS = [
+    {"xy": 0.04, "theta": 0.20},
+    {"xy": 0.07, "theta": 0.35},
+    {"xy": 0.10, "theta": 0.50},
+]
+
+# Repeated key events refresh the active command. After key repeat stops,
+# publish one zero command locally before the bridge watchdog times out.
+CONTROL_PERIOD_SEC = 0.05
+KEY_REPEAT_TIMEOUT_SEC = 0.35
+
+MOVE_KEYS = {
+    "w": (1.0, 0.0, 0.0, "forward"),
+    "s": (-1.0, 0.0, 0.0, "backward"),
+    "z": (0.0, 1.0, 0.0, "left"),
+    "x": (0.0, -1.0, 0.0, "right"),
+    "a": (0.0, 0.0, 1.0, "rotate left"),
+    "d": (0.0, 0.0, -1.0, "rotate right"),
+}
+
+
+def normalize_map_stem(value: str) -> str:
+    path = Path(value).expanduser()
+    if path.suffix in {".yaml", ".pgm"}:
+        path = path.with_suffix("")
+    return str(path)
+
+
+def str_bool(value: bool) -> str:
+    return "true" if value else "false"
+
+
+def build_mapping_command(args: argparse.Namespace) -> list[str]:
+    cmd = [
+        "ros2",
+        "launch",
+        "alohamini_bringup",
+        "mapping.launch.py",
+        f"host:={args.host}",
+        f"cmd_port:={args.cmd_port}",
+        f"obs_port:={args.obs_port}",
+        f"use_joint_state_publisher:={str_bool(args.use_joint_state_publisher)}",
+        f"linear_x_scale:={args.linear_x_scale}",
+        f"linear_y_scale:={args.linear_y_scale}",
+        f"angular_z_scale:={args.angular_z_scale}",
+        f"swap_xy:={str_bool(args.swap_xy)}",
+        f"require_observation_for_motion:={str_bool(args.require_observation_for_motion)}",
+    ]
+    if args.slam_params_file:
+        cmd.append(f"slam_params_file:={args.slam_params_file}")
+    return cmd
+
+
+def print_controls(map_stem: str, speed_index: int) -> None:
+    speed = SPEED_LEVELS[speed_index]
+    print(
+        "\nAlohaMini mapping session controls:\n"
+        "  w/s  forward/backward\n"
+        "  z/x  strafe left/right\n"
+        "  a/d  rotate left/right\n"
+        "  r/f  speed up/down\n"
+        "  Space or 0  stop and publish zero /cmd_vel\n"
+        f"  Shift+S  save map to {map_stem}.yaml/.pgm and keep mapping\n"
+        "  Shift+X  save map, then stop mapping.launch.py and exit\n"
+        "  q  stop mapping.launch.py without saving\n"
+        "  h  show this help\n"
+        "  Ctrl+C  stop mapping.launch.py without saving\n"
+        f"\nCurrent speed: level {speed_index + 1}/{len(SPEED_LEVELS)} "
+        f"xy={speed['xy']:.2f} m/s theta={speed['theta']:.2f} rad/s\n",
+        flush=True,
+    )
+
+
+def save_map(map_stem: str) -> bool:
+    Path(map_stem).parent.mkdir(parents=True, exist_ok=True)
+    cmd = ["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", map_stem]
+    print(f"\n[map] saving with: {' '.join(cmd)}", flush=True)
+    result = subprocess.run(cmd, check=False)
+    if result.returncode == 0:
+        print(f"[map] saved: {map_stem}.yaml and {map_stem}.pgm", flush=True)
+        return True
+    print(f"[map] save failed with exit code {result.returncode}; mapping is still running", file=sys.stderr, flush=True)
+    return False
+
+
+def motion_for_key(key: str, speed_index: int) -> tuple[float, float, float, str]:
+    x_dir, y_dir, yaw_dir, label = MOVE_KEYS[key]
+    speed = SPEED_LEVELS[speed_index]
+    return x_dir * speed["xy"], y_dir * speed["xy"], yaw_dir * speed["theta"], label
+
+
+def publish_cmd_vel(publisher, x: float, y: float, yaw: float, label: str, announce: bool = True) -> None:
+    msg = Twist()
+    msg.linear.x = x
+    msg.linear.y = y
+    msg.angular.z = yaw
+    publisher.publish(msg)
+    if announce:
+        print(f"\n[cmd_vel] {label}: x={x:.2f} y={y:.2f} yaw={yaw:.2f}", flush=True)
+
+
+def publish_zero_cmd_vel(publisher) -> None:
+    publish_cmd_vel(publisher, 0.0, 0.0, 0.0, "zero")
+
+
+def stop_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    print("\n[session] stopping mapping.launch.py", flush=True)
+    try:
+        os.killpg(process.pid, signal.SIGINT)
+    except ProcessLookupError:
+        return
+
+    deadline = time.monotonic() + 12.0
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return
+        time.sleep(0.2)
+
+    print("[session] mapping launch did not stop after SIGINT; sending SIGTERM", flush=True)
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return
+        time.sleep(0.2)
+
+    print("[session] mapping launch did not stop after SIGTERM; sending SIGKILL", flush=True)
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+
+def read_key(timeout_sec: float) -> str | None:
+    ready, _, _ = select.select([sys.stdin], [], [], timeout_sec)
+    if not ready:
+        return None
+    value = sys.stdin.read(1)
+    if value == "":
+        time.sleep(timeout_sec)
+        return None
+    return value
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run AlohaMini mapping with keyboard drive and map save controls.")
+    parser.add_argument("--host", default="127.0.0.1", help="AlohaMini ZMQ host passed to mapping.launch.py")
+    parser.add_argument("--cmd-port", default="5555", help="AlohaMini command ZMQ port")
+    parser.add_argument("--obs-port", default="5556", help="AlohaMini observation ZMQ port")
+    parser.add_argument("--map", default="/root/ws/maps/alohamini_map", help="Map output stem or .yaml path")
+    parser.add_argument("--slam-params-file", default="", help="Optional slam_toolbox params file")
+    parser.add_argument("--linear-x-scale", default="1.0")
+    parser.add_argument("--linear-y-scale", default="1.0")
+    parser.add_argument("--angular-z-scale", default="1.0")
+    parser.add_argument(
+        "--swap-xy",
+        dest="swap_xy",
+        action="store_true",
+        help="Enable ROS/host XY axis swap calibration if linear.x behaves as lateral motion.",
+    )
+    parser.add_argument("--no-swap-xy", dest="swap_xy", action="store_false", help=argparse.SUPPRESS)
+    parser.set_defaults(swap_xy=False)
+    parser.add_argument(
+        "--allow-motion-without-observation",
+        action="store_true",
+        help="Set require_observation_for_motion:=false. Not recommended for field mapping.",
+    )
+    parser.add_argument(
+        "--no-joint-state-publisher",
+        action="store_true",
+        help="Set use_joint_state_publisher:=false",
+    )
+    args = parser.parse_args()
+    args.map = normalize_map_stem(args.map)
+    args.require_observation_for_motion = not args.allow_motion_without_observation
+    args.use_joint_state_publisher = not args.no_joint_state_publisher
+    return args
+
+
+def find_running_mapping_nodes() -> list[str]:
+    mapping_nodes = {
+        "/alohamini_mapping_session_control",
+        "/alohamini_nav_bridge",
+        "/async_slam_toolbox_node",
+        "/slam_toolbox",
+        "/amcl",
+        "/bt_navigator",
+        "/controller_server",
+        "/planner_server",
+        "/map_server",
+    }
+    try:
+        result = subprocess.run(
+            ["ros2", "node", "list"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode != 0:
+        return []
+    return sorted(node for node in result.stdout.splitlines() if node in mapping_nodes)
+
+
+def main() -> int:
+    args = parse_args()
+    existing_nodes = find_running_mapping_nodes()
+    if existing_nodes:
+        print(
+            "[session] existing mapping/navigation/bridge nodes are already running: "
+            + ", ".join(existing_nodes)
+            + ". Stop the old mapping/navigation launch/session before starting a new one.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 2
+
+    mapping_cmd = build_mapping_command(args)
+    print(f"[session] starting: {' '.join(mapping_cmd)}", flush=True)
+    process = subprocess.Popen(mapping_cmd, preexec_fn=os.setsid)
+
+    rclpy.init(args=None)
+    control_node = rclpy.create_node("alohamini_mapping_session_control")
+    cmd_vel_pub = control_node.create_publisher(Twist, "/cmd_vel", 10)
+
+    old_termios = None
+    if sys.stdin.isatty():
+        old_termios = termios.tcgetattr(sys.stdin.fileno())
+        tty.setcbreak(sys.stdin.fileno())
+
+    speed_index = 0
+    print_controls(args.map, speed_index)
+    exit_code = 0
+    normal_key_exit = False
+    active_key = None
+    last_motion_key_time = 0.0
+    last_control_publish_time = 0.0
+    try:
+        while process.poll() is None:
+            now = time.monotonic()
+            key = read_key(0.02)
+            if key is None or key in {"\n", "\r"}:
+                pass
+            else:
+                lower_key = key.lower()
+                if key == "S":
+                    active_key = None
+                    publish_zero_cmd_vel(cmd_vel_pub)
+                    save_map(args.map)
+                elif key == "X":
+                    active_key = None
+                    if save_map(args.map):
+                        normal_key_exit = True
+                        publish_zero_cmd_vel(cmd_vel_pub)
+                        stop_process(process)
+                        break
+                elif key in {" ", "0"}:
+                    active_key = None
+                    publish_zero_cmd_vel(cmd_vel_pub)
+                    last_control_publish_time = now
+                elif lower_key == "h":
+                    print_controls(args.map, speed_index)
+                elif lower_key == "q":
+                    normal_key_exit = True
+                    active_key = None
+                    publish_zero_cmd_vel(cmd_vel_pub)
+                    stop_process(process)
+                    break
+                elif lower_key == "r":
+                    speed_index = min(speed_index + 1, len(SPEED_LEVELS) - 1)
+                    print_controls(args.map, speed_index)
+                    if active_key in MOVE_KEYS:
+                        x_cmd, y_cmd, yaw_cmd, label = motion_for_key(active_key, speed_index)
+                        publish_cmd_vel(cmd_vel_pub, x_cmd, y_cmd, yaw_cmd, label)
+                        last_control_publish_time = now
+                elif lower_key == "f":
+                    speed_index = max(speed_index - 1, 0)
+                    print_controls(args.map, speed_index)
+                    if active_key in MOVE_KEYS:
+                        x_cmd, y_cmd, yaw_cmd, label = motion_for_key(active_key, speed_index)
+                        publish_cmd_vel(cmd_vel_pub, x_cmd, y_cmd, yaw_cmd, label)
+                        last_control_publish_time = now
+                elif lower_key in MOVE_KEYS:
+                    previous_key = active_key
+                    active_key = lower_key
+                    last_motion_key_time = now
+                    x_cmd, y_cmd, yaw_cmd, label = motion_for_key(active_key, speed_index)
+                    publish_cmd_vel(
+                        cmd_vel_pub,
+                        x_cmd,
+                        y_cmd,
+                        yaw_cmd,
+                        label,
+                        announce=previous_key != active_key,
+                    )
+                    last_control_publish_time = now
+                else:
+                    print(f"\n[session] unknown key: {key!r}. Press h for help.", flush=True)
+
+            now = time.monotonic()
+            if active_key not in MOVE_KEYS:
+                continue
+            if now - last_motion_key_time > KEY_REPEAT_TIMEOUT_SEC:
+                active_key = None
+                publish_zero_cmd_vel(cmd_vel_pub)
+                last_control_publish_time = now
+            elif now - last_control_publish_time >= CONTROL_PERIOD_SEC:
+                x_cmd, y_cmd, yaw_cmd, label = motion_for_key(active_key, speed_index)
+                publish_cmd_vel(cmd_vel_pub, x_cmd, y_cmd, yaw_cmd, label, announce=False)
+                last_control_publish_time = now
+    except KeyboardInterrupt:
+        print("\n[session] Ctrl+C received; stopping without saving", flush=True)
+        publish_zero_cmd_vel(cmd_vel_pub)
+        stop_process(process)
+    finally:
+        if old_termios is not None:
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_termios)
+        if process.poll() is None:
+            stop_process(process)
+        if process.poll() is None:
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                stop_process(process)
+                process.wait(timeout=3)
+        if process.returncode not in (0, None) and not normal_key_exit:
+            exit_code = process.returncode
+        control_node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+    return exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
