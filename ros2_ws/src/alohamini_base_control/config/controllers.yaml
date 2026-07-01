@@ -1,0 +1,59 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 50  # Hz
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    omni_base_controller:
+      type: alohamini_base_control/OmniBaseController
+
+joint_state_broadcaster:
+  ros__parameters:
+    # Only publish the base wheel joints; arm joints live on a separate driver.
+    joints:
+      - wheel1
+      - wheel2
+      - wheel3
+    interfaces:
+      - position
+      - velocity
+
+omni_base_controller:
+  ros__parameters:
+    # Wheel joints, in the SAME order as wheel_angles_deg below.
+    # wheel1 -> ID 8 (left, 240 deg), wheel2 -> ID 10 (right, 120 deg),
+    # wheel3 -> ID 9 (back, 0 deg). Offset -90 deg matches lekiwi.py.
+    wheel_names:
+      - wheel1
+      - wheel2
+      - wheel3
+    wheel_angles_deg: [240.0, 120.0, 0.0]
+    angle_offset_deg: -90.0
+
+    # Geometry (from lekiwi.py defaults).
+    wheel_radius: 0.05
+    base_radius: 0.125
+    max_wheel_raw: 3000
+
+    # Topics / frames (kept identical to the old ZMQ bridge for drop-in use).
+    cmd_vel_topic: /cmd_vel
+    odom_topic: /odom
+    odom_frame: odom
+    base_frame: base_link
+    publish_tf: true
+    use_stamped_vel: false
+
+    # Command watchdog: stop if no /cmd_vel within this window (matches host watchdog).
+    cmd_timeout: 0.5
+
+    # Optional command clamps (0.0 = unlimited). Mirror bridge.launch.py defaults.
+    max_linear_speed: 0.20
+    max_lateral_speed: 0.20
+    max_angular_speed: 0.8
+
+    # Odometry covariance diagonal (xy, yaw).
+    pose_covariance_xy: 0.10
+    pose_covariance_yaw: 0.25
+    twist_covariance_xy: 0.20
+    twist_covariance_yaw: 0.35

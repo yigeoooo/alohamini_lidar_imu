@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="alohamini">
+  <!--
+    ros2_control description for the AlohaMini omniwheel base.
+
+    Pulls in the existing visual/collision URDF from alohamini_description (so the
+    mesh/joint tree is reused unchanged) and appends a <ros2_control> block binding
+    the three wheel joints to the AlohaMiniBaseHardware Feetech driver.
+
+    Wheel <-> motor-ID <-> kinematic-angle mapping (derived from the URDF wheel
+    positions, matching lekiwi.py's [left, back, right] = [240, 0, 120] degrees):
+      wheel1  (front-left,  pos angle ~150 deg) -> motor ID 8  (base_left_wheel)
+      wheel2  (front-right, pos angle ~30 deg)  -> motor ID 10 (base_right_wheel)
+      wheel3  (back,        pos angle ~-90 deg) -> motor ID 9  (base_back_wheel)
+    NOTE: spin direction (sign) should be confirmed on real hardware; angles/IDs
+    here are parameters so they can be flipped without recompiling.
+  -->
+
+  <xacro:arg name="serial_port" default="/dev/am_arm_follower_left"/>
+  <xacro:arg name="baud_rate" default="1000000"/>
+  <xacro:arg name="use_mock_hardware" default="false"/>
+
+  <!-- Reuse the existing robot description (meshes, links, joints). -->
+  <xacro:include filename="$(find alohamini_description)/urdf/alohamini_nav.urdf"/>
+
+  <ros2_control name="AlohaMiniBase" type="system">
+    <hardware>
+      <xacro:if value="$(arg use_mock_hardware)">
+        <plugin>mock_components/GenericSystem</plugin>
+        <param name="calculate_dynamics">true</param>
+      </xacro:if>
+      <xacro:unless value="$(arg use_mock_hardware)">
+        <plugin>alohamini_base_control/AlohaMiniBaseHardware</plugin>
+        <param name="serial_port">$(arg serial_port)</param>
+        <param name="baud_rate">$(arg baud_rate)</param>
+        <param name="max_wheel_raw">3000</param>
+        <param name="configure_motors">true</param>
+      </xacro:unless>
+    </hardware>
+
+    <joint name="wheel1">
+      <param name="motor_id">8</param>
+      <command_interface name="velocity"/>
+      <state_interface name="velocity"/>
+      <state_interface name="position"/>
+    </joint>
+    <joint name="wheel2">
+      <param name="motor_id">10</param>
+      <command_interface name="velocity"/>
+      <state_interface name="velocity"/>
+      <state_interface name="position"/>
+    </joint>
+    <joint name="wheel3">
+      <param name="motor_id">9</param>
+      <command_interface name="velocity"/>
+      <state_interface name="velocity"/>
+      <state_interface name="position"/>
+    </joint>
+  </ros2_control>
+</robot>
