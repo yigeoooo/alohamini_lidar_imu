@@ -98,6 +98,7 @@ ros2 launch alohamini_base_control base_control.launch.py \
    source /opt/ros/humble/setup.bash
    source ~/ws/install/setup.bash        # 换成你的工作区路径
    ```
+
 2. **选对串口**：底盘三个轮子舵机（ID 8/9/10）在哪条总线上就用哪个。多条 `ttyACM`
    分不清时：
    
@@ -105,13 +106,18 @@ ros2 launch alohamini_base_control base_control.launch.py \
    ls -l /dev/ttyACM* /dev/ttyUSB*
    readlink -f /dev/am_arm_follower_left   # 若有这个 udev 别名，优先用它，编号不会漂
    ```
+
 3. **串口权限**：`sudo usermod -aG dialout $USER`（重新登录生效），或临时
    `sudo chmod 666 /dev/ttyACM0`。
+
 4. **首次务必架空轮子**（离地）低速测试，确认三轮转向正确再落地。
+
 5. **急停**：`Ctrl-C` 停 launch 时 `on_deactivate` 会自动写 0 速度停车；`/cmd_vel`
    断流超过 `cmd_timeout`（默认 0.5s）看门狗也会自动停车。
+
 6. **速度限幅**：`controllers.yaml` 默认 `max_linear_speed=0.20`、
    `max_angular_speed=0.8`，首测建议再调小。
+
 7. **暂无过流保护**：原 Python 驱动有过流跳闸（2000mA），本 C++ 版只移植了速度控制，
    未含过流监控——长时间堵转请留意舵机温度。
 

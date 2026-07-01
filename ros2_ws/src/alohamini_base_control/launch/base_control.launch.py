@@ -23,6 +23,7 @@ def generate_launch_description():
     serial_port = LaunchConfiguration("serial_port")
     baud_rate = LaunchConfiguration("baud_rate")
     use_mock_hardware = LaunchConfiguration("use_mock_hardware")
+    joint_states_topic = LaunchConfiguration("joint_states_topic")
 
     pkg_share = FindPackageShare("alohamini_base_control")
 
@@ -44,10 +45,14 @@ def generate_launch_description():
 
     controllers_yaml = PathJoinSubstitution([pkg_share, "config", "controllers.yaml"])
 
+    # joint_state_broadcaster publishes /joint_states from the controller_manager
+    # process; remap it (default is /joint_states) so a higher-level launch can merge
+    # the wheel states with arm/lift defaults on a single /joint_states topic.
     control_node = Node(
         package="controller_manager",
         executable="ros2_control_node",
         parameters=[robot_description, controllers_yaml],
+        remappings=[("/joint_states", joint_states_topic)],
         output="screen",
     )
 
@@ -82,7 +87,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument(
                 "serial_port",
-                default_value="/dev/ACM0",
+                default_value="/dev/ttyACM0",
                 description="Serial port of the Feetech bus driving the base wheels. "
                 "NOTE: shared with the left arm/lift; do not run the lerobot host concurrently.",
             ),
@@ -91,6 +96,13 @@ def generate_launch_description():
                 "use_mock_hardware",
                 default_value="false",
                 description="Use ros2_control mock_components instead of the real serial driver.",
+            ),
+            DeclareLaunchArgument(
+                "joint_states_topic",
+                default_value="/joint_states",
+                description="Topic the joint_state_broadcaster publishes wheel states on. "
+                "Set to e.g. /wheel_joint_states when a joint_state_publisher merges the "
+                "arm/lift joints on /joint_states.",
             ),
             control_node,
             robot_state_publisher,
