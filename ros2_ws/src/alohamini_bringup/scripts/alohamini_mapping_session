@@ -2,10 +2,9 @@
 """Interactive AlohaMini mapping session helper.
 
 This wrapper starts mapping.launch.py and provides keyboard teleop controls:
-  w: forward
+  w/s: forward/backward
+  z/x: left/right strafe
   a/d: rotate left/right
-  s: backward only with --allow-reverse
-  z/x: strafe only with --allow-lateral-motion
   r/f: speed up/down
   Space: stop and publish zero /cmd_vel
   Shift+S: save the current map and keep mapping
@@ -77,12 +76,7 @@ def build_mapping_command(args: argparse.Namespace) -> list[str]:
         f"linear_x_scale:={args.linear_x_scale}",
         f"linear_y_scale:={args.linear_y_scale}",
         f"angular_z_scale:={args.angular_z_scale}",
-        f"odom_linear_x_scale:={args.odom_linear_x_scale}",
-        f"odom_linear_y_scale:={args.odom_linear_y_scale}",
-        f"odom_angular_z_scale:={args.odom_angular_z_scale}",
         f"swap_xy:={str_bool(args.swap_xy)}",
-        f"allow_reverse:={str_bool(args.allow_reverse)}",
-        f"allow_lateral_motion:={str_bool(args.allow_lateral_motion)}",
         f"require_observation_for_motion:={str_bool(args.require_observation_for_motion)}",
     ]
     if args.slam_params_file:
@@ -94,10 +88,9 @@ def print_controls(map_stem: str, speed_index: int) -> None:
     speed = SPEED_LEVELS[speed_index]
     print(
         "\nAlohaMini mapping session controls:\n"
-        "  w  forward\n"
+        "  w/s  forward/backward\n"
+        "  z/x  strafe left/right\n"
         "  a/d  rotate left/right\n"
-        "  s  backward (blocked unless --allow-reverse)\n"
-        "  z/x  strafe left/right (blocked unless --allow-lateral-motion)\n"
         "  r/f  speed up/down\n"
         "  Space or 0  stop and publish zero /cmd_vel\n"
         f"  Shift+S  save map to {map_stem}.yaml/.pgm and keep mapping\n"
@@ -123,14 +116,7 @@ def save_map(map_stem: str) -> bool:
     return False
 
 
-def motion_for_key(
-    key: str, speed_index: int, allow_reverse: bool, allow_lateral_motion: bool
-) -> tuple[float, float, float, str]:
-    if key == "s" and not allow_reverse:
-        return 0.0, 0.0, 0.0, "backward blocked"
-    if key in {"z", "x"} and not allow_lateral_motion:
-        return 0.0, 0.0, 0.0, "lateral blocked"
-
+def motion_for_key(key: str, speed_index: int) -> tuple[float, float, float, str]:
     x_dir, y_dir, yaw_dir, label = MOVE_KEYS[key]
     speed = SPEED_LEVELS[speed_index]
     return x_dir * speed["xy"], y_dir * speed["xy"], yaw_dir * speed["theta"], label
@@ -205,9 +191,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--linear-x-scale", default="1.0")
     parser.add_argument("--linear-y-scale", default="1.0")
     parser.add_argument("--angular-z-scale", default="1.0")
-    parser.add_argument("--odom-linear-x-scale", default="1.0")
-    parser.add_argument("--odom-linear-y-scale", default="1.0")
-    parser.add_argument("--odom-angular-z-scale", default="1.0")
     parser.add_argument(
         "--swap-xy",
         dest="swap_xy",
@@ -217,24 +200,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-swap-xy", dest="swap_xy", action="store_false", help=argparse.SUPPRESS)
     parser.set_defaults(swap_xy=False)
     parser.add_argument(
-        "--allow-reverse",
-        action="store_true",
-        help="Allow backward cmd_vel during mapping. Disabled by default for front-sector lidar.",
-    )
-    parser.add_argument(
-        "--allow-lateral-motion",
-        action="store_true",
-        help="Allow lateral cmd_vel during mapping. Disabled by default for front-sector lidar.",
-    )
-    parser.add_argument(
-        "--require-observation-for-motion",
-        action="store_true",
-        help="Only send nonzero bridge commands after fresh host observations are received.",
-    )
-    parser.add_argument(
         "--allow-motion-without-observation",
         action="store_true",
-        help=argparse.SUPPRESS,
+        help="Set require_observation_for_motion:=false. Not recommended for field mapping.",
     )
     parser.add_argument(
         "--no-joint-state-publisher",
@@ -243,7 +211,7 @@ def parse_args() -> argparse.Namespace:
     )
     args = parser.parse_args()
     args.map = normalize_map_stem(args.map)
-    args.require_observation_for_motion = args.require_observation_for_motion and not args.allow_motion_without_observation
+    args.require_observation_for_motion = not args.allow_motion_without_observation
     args.use_joint_state_publisher = not args.no_joint_state_publisher
     return args
 
@@ -343,21 +311,21 @@ def main() -> int:
                     speed_index = min(speed_index + 1, len(SPEED_LEVELS) - 1)
                     print_controls(args.map, speed_index)
                     if active_key in MOVE_KEYS:
-                        x_cmd, y_cmd, yaw_cmd, label = motion_for_key(active_key, speed_index, args.allow_reverse, args.allow_lateral_motion)
+                        x_cmd, y_cmd, yaw_cmd, label = motion_for_key(active_key, speed_index)
                         publish_cmd_vel(cmd_vel_pub, x_cmd, y_cmd, yaw_cmd, label)
                         last_control_publish_time = now
                 elif lower_key == "f":
                     speed_index = max(speed_index - 1, 0)
                     print_controls(args.map, speed_index)
                     if active_key in MOVE_KEYS:
-                        x_cmd, y_cmd, yaw_cmd, label = motion_for_key(active_key, speed_index, args.allow_reverse, args.allow_lateral_motion)
+                        x_cmd, y_cmd, yaw_cmd, label = motion_for_key(active_key, speed_index)
                         publish_cmd_vel(cmd_vel_pub, x_cmd, y_cmd, yaw_cmd, label)
                         last_control_publish_time = now
                 elif lower_key in MOVE_KEYS:
                     previous_key = active_key
                     active_key = lower_key
                     last_motion_key_time = now
-                    x_cmd, y_cmd, yaw_cmd, label = motion_for_key(active_key, speed_index, args.allow_reverse, args.allow_lateral_motion)
+                    x_cmd, y_cmd, yaw_cmd, label = motion_for_key(active_key, speed_index)
                     publish_cmd_vel(
                         cmd_vel_pub,
                         x_cmd,
@@ -378,15 +346,12 @@ def main() -> int:
                 publish_zero_cmd_vel(cmd_vel_pub)
                 last_control_publish_time = now
             elif now - last_control_publish_time >= CONTROL_PERIOD_SEC:
-                x_cmd, y_cmd, yaw_cmd, label = motion_for_key(active_key, speed_index, args.allow_reverse, args.allow_lateral_motion)
+                x_cmd, y_cmd, yaw_cmd, label = motion_for_key(active_key, speed_index)
                 publish_cmd_vel(cmd_vel_pub, x_cmd, y_cmd, yaw_cmd, label, announce=False)
                 last_control_publish_time = now
     except KeyboardInterrupt:
         print("\n[session] Ctrl+C received; stopping without saving", flush=True)
-        try:
-            publish_zero_cmd_vel(cmd_vel_pub)
-        except Exception as exc:
-            print(f"\n[session] zero cmd_vel publish skipped during shutdown: {exc}", flush=True)
+        publish_zero_cmd_vel(cmd_vel_pub)
         stop_process(process)
     finally:
         if old_termios is not None:

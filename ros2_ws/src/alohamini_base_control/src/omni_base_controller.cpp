@@ -273,6 +273,12 @@ controller_interface::return_type OmniBaseController::update(
     cmd = BodyVelocity{};  // stale or no command -> stop (watchdog).
   }
 
+  // NOTE: neither the command nor the odom velocity is rotated here. On real hardware
+  // the wheel-level kinematics already produce correct physical motion for /cmd_vel,
+  // and odom is published in `base_frame` (base_footprint), which a static URDF joint
+  // rotates onto the SolidWorks base_link. So the whole chain stays self-consistent
+  // and REP-103 compliant (x=forward, y=left) without any velocity fudging.
+
   // ---- 2. Forward kinematics -> wheel velocity commands. ----
   const std::array<double, 3> wheel_cmd = bodyToWheel(cmd);
   for (std::size_t i = 0; i < command_interfaces_.size() && i < 3; ++i) {
@@ -284,7 +290,25 @@ controller_interface::return_type OmniBaseController::update(
   for (std::size_t i = 0; i < state_interfaces_.size() && i < 3; ++i) {
     wheel_state[i] = state_interfaces_[i].get_value();
   }
-  const BodyVelocity vel = wheelToBody(wheel_state);
+  BodyVelocity vel = wheelToBody(wheel_state);
+  // lekiwi's forward kinematics negate x,y (velocity_vector = [-x,-y,theta]) but the
+  // inverse does not, so the body velocity recovered from wheel feedback comes out
+  // 180 deg flipped relative to the physical motion. Negate x,y here so /odom reports
+  // motion in the same direction the base actually moves (+x = forward in
+  // base_footprint), keeping the odom arrow, trajectory and mesh all consistent.
+  vel.x = -vel.x;
+  vel.y = -vel.y;
+
+  // Throttled diagnostic (once per second): what this controller reads on its claimed
+  // state interfaces and what it computes for odom. DEBUG so it is silent by default;
+  // enable with `ros2 service call /omni_base_controller/set_logger_levels ...` or a
+  // launch --log-level to debug "wheels move but /odom stays 0" type issues.
+  RCLCPP_DEBUG_THROTTLE(
+    get_node()->get_logger(), *get_node()->get_clock(), 1000,
+    "n_state_if=%zu wheel_state=[%.3f %.3f %.3f] rad/s -> vel x=%.3f y=%.3f yaw=%.3f | "
+    "odom=[%.3f %.3f %.3f]",
+    state_interfaces_.size(), wheel_state[0], wheel_state[1], wheel_state[2],
+    vel.x, vel.y, vel.yaw, odom_x_, odom_y_, odom_yaw_);
 
   const double dt = period.seconds();
   if (dt > 0.0 && dt < 1.0) {

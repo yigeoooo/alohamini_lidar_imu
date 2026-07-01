@@ -15,12 +15,7 @@ def generate_launch_description():
     linear_x_scale = LaunchConfiguration("linear_x_scale")
     linear_y_scale = LaunchConfiguration("linear_y_scale")
     angular_z_scale = LaunchConfiguration("angular_z_scale")
-    odom_linear_x_scale = LaunchConfiguration("odom_linear_x_scale")
-    odom_linear_y_scale = LaunchConfiguration("odom_linear_y_scale")
-    odom_angular_z_scale = LaunchConfiguration("odom_angular_z_scale")
     swap_xy = LaunchConfiguration("swap_xy")
-    allow_reverse = LaunchConfiguration("allow_reverse")
-    allow_lateral_motion = LaunchConfiguration("allow_lateral_motion")
     require_observation_for_motion = LaunchConfiguration("require_observation_for_motion")
 
     sensors_bridge_launch = PathJoinSubstitution(
@@ -44,12 +39,7 @@ def generate_launch_description():
             DeclareLaunchArgument("linear_x_scale", default_value="1.0"),
             DeclareLaunchArgument("linear_y_scale", default_value="1.0"),
             DeclareLaunchArgument("angular_z_scale", default_value="1.0"),
-            DeclareLaunchArgument("odom_linear_x_scale", default_value="1.0"),
-            DeclareLaunchArgument("odom_linear_y_scale", default_value="1.0"),
-            DeclareLaunchArgument("odom_angular_z_scale", default_value="1.0"),
             DeclareLaunchArgument("swap_xy", default_value="false"),
-            DeclareLaunchArgument("allow_reverse", default_value="false"),
-            DeclareLaunchArgument("allow_lateral_motion", default_value="false"),
             DeclareLaunchArgument("require_observation_for_motion", default_value="true"),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(sensors_bridge_launch),
@@ -61,12 +51,7 @@ def generate_launch_description():
                     "linear_x_scale": linear_x_scale,
                     "linear_y_scale": linear_y_scale,
                     "angular_z_scale": angular_z_scale,
-                    "odom_linear_x_scale": odom_linear_x_scale,
-                    "odom_linear_y_scale": odom_linear_y_scale,
-                    "odom_angular_z_scale": odom_angular_z_scale,
                     "swap_xy": swap_xy,
-                    "allow_reverse": allow_reverse,
-                    "allow_lateral_motion": allow_lateral_motion,
                     "require_observation_for_motion": require_observation_for_motion,
                 }.items(),
             ),
