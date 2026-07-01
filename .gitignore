@@ -20,3 +20,5 @@ ros2_ws/maps/
 # caches
 firmware/lidar_imu_publisher/sdkconfig
 firmware/lidar_imu_publisher/sdkconfig.old
+
+./extra_components/*

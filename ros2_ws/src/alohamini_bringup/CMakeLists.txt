@@ -4,7 +4,7 @@ project(alohamini_bringup)
 find_package(ament_cmake REQUIRED)
 
 install(
-  DIRECTORY launch config rviz
+  DIRECTORY launch config rviz behavior_trees
   DESTINATION share/${PROJECT_NAME}
 )
 

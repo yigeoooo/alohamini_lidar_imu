@@ -16,6 +16,7 @@ void Icm42670p_Get_Accel_RawData(int16_t accel[3]);
 void Icm42670p_Get_Gyro_RawData(int16_t gyro[3]);
 int Icm42670p_Start_OK(void);
 
+void Icm42670p_Get_Accel_Gyro(float accel_g[3], float gyro_dps[3]);
 void Icm42670p_Get_Accel_g(float accel_g[3]);
 void Icm42670p_Get_Gyro_dps(float gyro_dps[3]);
 void Icm42670p_Get_Accel_Gyro_FSR(uint16_t *accel_fsr_g, uint16_t *gyro_fsr_dps);

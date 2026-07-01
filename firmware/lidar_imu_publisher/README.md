@@ -12,7 +12,7 @@
 关键配置在本机 `sdkconfig`（含 WiFi 密码，已被 .gitignore 忽略，不提交到 GitHub）：
 
 - `CONFIG_MICRO_ROS_DOMAIN_ID=5`
-- `CONFIG_MICRO_ROS_AGENT_IP="192.168.10.29"`
+- `CONFIG_MICRO_ROS_AGENT_IP="192.168.10.157"`
 - `CONFIG_MICRO_ROS_AGENT_PORT="8090"`
 - `CONFIG_ESP_WIFI_SSID="Dexforce"`
 
