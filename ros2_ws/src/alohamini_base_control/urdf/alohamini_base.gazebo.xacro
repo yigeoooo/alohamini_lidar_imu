@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="alohamini">
+  <!--
+    Gazebo Classic simulation description for the AlohaMini omniwheel base.
+
+    Separate from urdf/alohamini_base.ros2_control.xacro (which drives the real
+    Feetech serial hardware): this file swaps in gazebo_ros2_control's GazeboSystem
+    so the SAME OmniBaseController plugin runs against the simulated wheel joints.
+    The cmd_vel -> wheel-velocity -> odom -> TF chain is therefore exercised
+    end-to-end in sim, with no change to the controller or its config.
+
+    Omni-wheel approximation: Gazebo Classic cannot model omni roller contacts, so
+    the three wheels are given low lateral friction (mu2 << mu1) so the base can be
+    dragged sideways without the wheels fighting each other. This is a visual/logic
+    approximation, not a faithful tyre model (see README caveats).
+  -->
+
+  <xacro:arg name="wheel_mu1" default="1.0"/>
+  <xacro:arg name="wheel_mu2" default="0.0"/>
+
+  <!-- Reuse the existing robot description (meshes, links, joints). -->
+  <xacro:include filename="$(find alohamini_description)/urdf/alohamini_nav.urdf"/>
+
+  <!-- ros2_control block bound to the Gazebo simulation system.
+       NOTE: joint names carry a _joint suffix. Gazebo Classic rejects a joint whose
+       name equals a link name (the SolidWorks-exported URDF names each wheel joint
+       identically to its child link), so gazebo.launch.py renames the three wheel
+       joints wheelN -> wheelN_joint before spawning. These must match. -->
+  <ros2_control name="AlohaMiniBaseSim" type="system">
+    <hardware>
+      <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+    </hardware>
+    <joint name="wheel1_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="velocity"/>
+      <state_interface name="position"/>
+    </joint>
+    <joint name="wheel2_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="velocity"/>
+      <state_interface name="position"/>
+    </joint>
+    <joint name="wheel3_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="velocity"/>
+      <state_interface name="position"/>
+    </joint>
+  </ros2_control>
+
+  <!-- Load the gazebo_ros2_control plugin and point it at our controllers.yaml. -->
+  <gazebo>
+    <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
+      <parameters>$(find alohamini_base_control)/config/controllers_sim.yaml</parameters>
+    </plugin>
+  </gazebo>
+
+  <!-- Per-wheel surface friction: high along roll axis, ~0 laterally (omni approx). -->
+  <xacro:macro name="wheel_gazebo" params="link">
+    <gazebo reference="${link}">
+      <mu1>$(arg wheel_mu1)</mu1>
+      <mu2>$(arg wheel_mu2)</mu2>
+      <kp>1000000.0</kp>
+      <kd>100.0</kd>
+      <material>Gazebo/Black</material>
+    </gazebo>
+  </xacro:macro>
+  <xacro:wheel_gazebo link="wheel1"/>
+  <xacro:wheel_gazebo link="wheel2"/>
+  <xacro:wheel_gazebo link="wheel3"/>
+
+  <gazebo reference="base_link">
+    <material>Gazebo/Grey</material>
+  </gazebo>
+</robot>

@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>alohamini_base_control</name>
+  <version>0.1.0</version>
+  <description>
+    C++ ros2_control hardware interface and omni-drive controller for the AlohaMini
+    three-omniwheel mobile base. Ported from the lerobot_alohamini Python chassis
+    driver (Feetech STS3215, motor IDs 8/9/10) to talk to the serial bus directly.
+  </description>
+  <maintainer email="todo@example.com">AlohaMini</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>hardware_interface</depend>
+  <depend>controller_interface</depend>
+  <depend>controller_manager</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_msgs</depend>
+  <depend>realtime_tools</depend>
+
+  <exec_depend>joint_state_broadcaster</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>alohamini_description</exec_depend>
+  <exec_depend>ros2_control</exec_depend>
+  <exec_depend>ros2_controllers</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <!-- Gazebo Classic simulation (gazebo.launch.py / alohamini_base.gazebo.xacro). -->
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>gazebo_ros2_control</exec_depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+    <hardware_interface plugin="${prefix}/alohamini_base_control_plugins.xml"/>
+    <controller_interface plugin="${prefix}/alohamini_base_control_plugins.xml"/>
+  </export>
+</package>
