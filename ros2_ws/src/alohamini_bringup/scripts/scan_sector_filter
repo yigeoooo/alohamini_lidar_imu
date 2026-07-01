@@ -2,12 +2,9 @@
 from __future__ import annotations
 
 import math
-from typing import Optional, Tuple
 
 import rclpy
-from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
 
 
@@ -17,14 +14,6 @@ def as_bool(value) -> bool:
     if isinstance(value, (int, float)):
         return bool(value)
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def finite_or_none(value) -> Optional[float]:
-    try:
-        number = float(value)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return number if math.isfinite(number) else None
 
 
 class ScanSectorFilter(Node):
@@ -41,18 +30,9 @@ class ScanSectorFilter(Node):
         self.min_angle = float(self.get_parameter("min_angle").value)
         self.max_angle = float(self.get_parameter("max_angle").value)
         self.replacement = math.nan if as_bool(self.get_parameter("use_nan").value) else math.inf
-        self._warned_bad_geometry = False
-        self._warned_range_length = False
-        self._warned_intensity_length = False
-        self._warned_invalid_ranges = False
 
         self.publisher = self.create_publisher(LaserScan, self.output_topic, 10)
-        self.subscription = self.create_subscription(
-            LaserScan,
-            self.input_topic,
-            self.on_scan,
-            qos_profile_sensor_data,
-        )
+        self.subscription = self.create_subscription(LaserScan, self.input_topic, self.on_scan, 10)
         self.get_logger().info(
             f"Filtering {self.input_topic} -> {self.output_topic}; "
             f"keeping angles [{self.min_angle:.3f}, {self.max_angle:.3f}] rad"
@@ -62,56 +42,6 @@ class ScanSectorFilter(Node):
         if self.min_angle <= self.max_angle:
             return self.min_angle <= angle <= self.max_angle
         return angle >= self.min_angle or angle <= self.max_angle
-
-    def warn_once(self, attribute: str, message: str) -> None:
-        if getattr(self, attribute):
-            return
-        setattr(self, attribute, True)
-        self.get_logger().warning(message)
-
-    def expected_range_count(self, msg: LaserScan) -> int:
-        raw_count = len(msg.ranges)
-        angle_min = finite_or_none(msg.angle_min)
-        angle_max = finite_or_none(msg.angle_max)
-        angle_increment = finite_or_none(msg.angle_increment)
-        if angle_min is None or angle_max is None or angle_increment is None or angle_increment == 0.0:
-            self.warn_once(
-                "_warned_bad_geometry",
-                "LaserScan angle metadata is invalid; preserving incoming range array length.",
-            )
-            return raw_count
-
-        span = angle_max - angle_min
-        steps = span / angle_increment
-        if steps < 0.0:
-            self.warn_once(
-                "_warned_bad_geometry",
-                "LaserScan angle_min/angle_max/angle_increment are inconsistent; "
-                "preserving incoming range array length.",
-            )
-            return raw_count
-
-        return max(0, int(round(steps)) + 1)
-
-    def sanitize_range(
-        self,
-        value,
-        range_min: Optional[float],
-        range_max: Optional[float],
-    ) -> Tuple[float, bool]:
-        number = finite_or_none(value)
-        if number is None:
-            return self.replacement, True
-        if range_min is not None and number < range_min:
-            return self.replacement, True
-        if range_max is not None and number > range_max:
-            return self.replacement, True
-        return number, False
-
-    @staticmethod
-    def sanitize_intensity(value) -> float:
-        number = finite_or_none(value)
-        return number if number is not None else 0.0
 
     def on_scan(self, msg: LaserScan) -> None:
         filtered = LaserScan()
@@ -124,70 +54,35 @@ class ScanSectorFilter(Node):
         filtered.range_min = msg.range_min
         filtered.range_max = msg.range_max
 
-        expected_count = self.expected_range_count(msg)
-        raw_range_count = len(msg.ranges)
-        if expected_count != raw_range_count:
-            self.warn_once(
-                "_warned_range_length",
-                f"LaserScan ranges length {raw_range_count} does not match angle metadata "
-                f"count {expected_count}; publishing normalized length.",
-            )
-
-        range_min = finite_or_none(msg.range_min)
-        range_max = finite_or_none(msg.range_max)
-        if range_min is not None and range_max is not None and range_max < range_min:
-            range_min = None
-            range_max = None
-
-        raw_intensity_count = len(msg.intensities)
-        use_intensities = raw_intensity_count in {0, raw_range_count, expected_count}
-        if not use_intensities:
-            self.warn_once(
-                "_warned_intensity_length",
-                f"LaserScan intensities length {raw_intensity_count} does not match ranges "
-                f"length {raw_range_count}; publishing empty intensities.",
-            )
-
         ranges = []
         intensities = []
-        had_invalid_ranges = False
-        for index in range(expected_count):
+        has_intensities = len(msg.intensities) == len(msg.ranges)
+        for index, value in enumerate(msg.ranges):
             angle = msg.angle_min + index * msg.angle_increment
-            if index < raw_range_count and self.keep_angle(angle):
-                value, invalid = self.sanitize_range(msg.ranges[index], range_min, range_max)
+            if self.keep_angle(angle):
                 ranges.append(value)
-                had_invalid_ranges = had_invalid_ranges or invalid
-                if use_intensities and raw_intensity_count:
-                    intensities.append(self.sanitize_intensity(msg.intensities[index]))
+                if has_intensities:
+                    intensities.append(msg.intensities[index])
             else:
                 ranges.append(self.replacement)
-                if use_intensities and raw_intensity_count:
+                if has_intensities:
                     intensities.append(0.0)
 
-        if had_invalid_ranges:
-            self.warn_once(
-                "_warned_invalid_ranges",
-                "LaserScan contains invalid or out-of-range values; replacing them in filtered output.",
-            )
-
         filtered.ranges = ranges
-        filtered.intensities = intensities if use_intensities and raw_intensity_count else []
+        filtered.intensities = intensities if has_intensities else list(msg.intensities)
         self.publisher.publish(filtered)
 
 
 def main(args=None) -> None:
-    node = None
     rclpy.init(args=args)
+    node = ScanSectorFilter()
     try:
-        node = ScanSectorFilter()
         rclpy.spin(node)
-    except (KeyboardInterrupt, ExternalShutdownException):
+    except KeyboardInterrupt:
         pass
     finally:
-        if node is not None:
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == "__main__":

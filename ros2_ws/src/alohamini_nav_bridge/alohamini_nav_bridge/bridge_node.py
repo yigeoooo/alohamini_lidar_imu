@@ -5,7 +5,6 @@ from dataclasses import dataclass
 import rclpy
 from geometry_msgs.msg import TransformStamped, Twist
 from nav_msgs.msg import Odometry
-from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from tf2_ros import TransformBroadcaster
 import zmq
@@ -58,12 +57,7 @@ class AlohaMiniNavBridge(Node):
         self.declare_parameter("linear_x_scale", 1.0)
         self.declare_parameter("linear_y_scale", 1.0)
         self.declare_parameter("angular_z_scale", 1.0)
-        self.declare_parameter("odom_linear_x_scale", 1.0)
-        self.declare_parameter("odom_linear_y_scale", 1.0)
-        self.declare_parameter("odom_angular_z_scale", 1.0)
         self.declare_parameter("swap_xy", False)
-        self.declare_parameter("allow_reverse", False)
-        self.declare_parameter("allow_lateral_motion", False)
         self.declare_parameter("require_observation_for_motion", True)
         self.declare_parameter("pose_covariance_xy", 0.10)
         self.declare_parameter("pose_covariance_yaw", 0.25)
@@ -85,12 +79,7 @@ class AlohaMiniNavBridge(Node):
         self.linear_x_scale = float(self.get_parameter("linear_x_scale").value)
         self.linear_y_scale = float(self.get_parameter("linear_y_scale").value)
         self.angular_z_scale = float(self.get_parameter("angular_z_scale").value)
-        self.odom_linear_x_scale = float(self.get_parameter("odom_linear_x_scale").value)
-        self.odom_linear_y_scale = float(self.get_parameter("odom_linear_y_scale").value)
-        self.odom_angular_z_scale = float(self.get_parameter("odom_angular_z_scale").value)
         self.swap_xy = as_bool(self.get_parameter("swap_xy").value)
-        self.allow_reverse = as_bool(self.get_parameter("allow_reverse").value)
-        self.allow_lateral_motion = as_bool(self.get_parameter("allow_lateral_motion").value)
         self.require_observation_for_motion = as_bool(self.get_parameter("require_observation_for_motion").value)
         self.pose_covariance_xy = float(self.get_parameter("pose_covariance_xy").value)
         self.pose_covariance_yaw = float(self.get_parameter("pose_covariance_yaw").value)
@@ -131,15 +120,8 @@ class AlohaMiniNavBridge(Node):
         )
 
     def on_cmd_vel(self, msg: Twist) -> None:
-        cmd_x = float(msg.linear.x)
-        cmd_y = float(msg.linear.y)
-        if not self.allow_reverse:
-            cmd_x = max(0.0, cmd_x)
-        if not self.allow_lateral_motion:
-            cmd_y = 0.0
-
-        ros_x = clamp(cmd_x, self.max_linear_speed) * self.linear_x_scale
-        ros_y = clamp(cmd_y, self.max_lateral_speed) * self.linear_y_scale
+        ros_x = clamp(float(msg.linear.x), self.max_linear_speed) * self.linear_x_scale
+        ros_y = clamp(float(msg.linear.y), self.max_lateral_speed) * self.linear_y_scale
         vx, vy = (ros_y, ros_x) if self.swap_xy else (ros_x, ros_y)
         wz = clamp(float(msg.angular.z), self.max_angular_speed) * self.angular_z_scale
         self.cmd = BodyVelocity(x=vx, y=vy, yaw=wz)
@@ -172,9 +154,9 @@ class AlohaMiniNavBridge(Node):
             host_y = float(data.get("y.vel", 0.0))
             ros_x, ros_y = (host_y, host_x) if self.swap_xy else (host_x, host_y)
             self.observed = BodyVelocity(
-                x=ros_x * self.odom_linear_x_scale,
-                y=ros_y * self.odom_linear_y_scale,
-                yaw=math.radians(float(data.get("theta.vel", 0.0))) * self.odom_angular_z_scale,
+                x=ros_x * self.linear_x_scale,
+                y=ros_y * self.linear_y_scale,
+                yaw=math.radians(float(data.get("theta.vel", 0.0))) * self.angular_z_scale,
             )
             self.last_obs_time = now
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -264,39 +246,25 @@ class AlohaMiniNavBridge(Node):
 
     def destroy_node(self):
         try:
-            try:
-                self.cmd_socket.send_string(
-                    json.dumps({"x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0}),
-                    flags=zmq.NOBLOCK,
-                )
-            except (zmq.Again, zmq.ZMQError) as exc:
-                self.get_logger().warning(f"Zero command skipped during shutdown: {exc}")
-
-            for socket in (self.cmd_socket, self.obs_socket):
-                try:
-                    socket.close(linger=0)
-                except zmq.ZMQError as exc:
-                    self.get_logger().warning(f"ZMQ socket close failed during shutdown: {exc}")
-
-            try:
-                self.zmq_context.term()
-            except zmq.ZMQError as exc:
-                self.get_logger().warning(f"ZMQ context term failed during shutdown: {exc}")
+            self.cmd_socket.send_string(
+                json.dumps({"x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0}),
+                flags=zmq.NOBLOCK,
+            )
+            self.cmd_socket.close(linger=0)
+            self.obs_socket.close(linger=0)
+            self.zmq_context.term()
         finally:
             super().destroy_node()
 
 
 def main(args=None):
-    node = None
     rclpy.init(args=args)
+    node = AlohaMiniNavBridge()
     try:
-        node = AlohaMiniNavBridge()
         rclpy.spin(node)
-    except (KeyboardInterrupt, ExternalShutdownException):
+    except KeyboardInterrupt:
         pass
     finally:
-        if node is not None:
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        node.destroy_node()
+        rclpy.shutdown()
 

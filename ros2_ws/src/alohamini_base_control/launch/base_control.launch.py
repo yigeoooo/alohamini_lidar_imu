@@ -24,6 +24,7 @@ def generate_launch_description():
     baud_rate = LaunchConfiguration("baud_rate")
     use_mock_hardware = LaunchConfiguration("use_mock_hardware")
     joint_states_topic = LaunchConfiguration("joint_states_topic")
+    base_yaw_deg = LaunchConfiguration("base_yaw_deg")
 
     pkg_share = FindPackageShare("alohamini_base_control")
 
@@ -39,6 +40,8 @@ def generate_launch_description():
             baud_rate,
             " use_mock_hardware:=",
             use_mock_hardware,
+            " base_yaw_deg:=",
+            base_yaw_deg,
         ]
     )
     robot_description = {"robot_description": ParameterValue(robot_description_content, value_type=str)}
@@ -103,6 +106,13 @@ def generate_launch_description():
                 description="Topic the joint_state_broadcaster publishes wheel states on. "
                 "Set to e.g. /wheel_joint_states when a joint_state_publisher merges the "
                 "arm/lift joints on /joint_states.",
+            ),
+            DeclareLaunchArgument(
+                "base_yaw_deg",
+                default_value="90.0",
+                description="Static yaw (deg) of base_footprint->base_link, aligning the "
+                "REP-103 odom frame with the SolidWorks base_link mesh. Tune here without "
+                "recompiling if forward/left look wrong in RViz (try -90/90/180/0).",
             ),
             control_node,
             robot_state_publisher,

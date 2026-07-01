@@ -82,6 +82,9 @@ private:
   int baud_rate_ = 1000000;
   int max_wheel_raw_ = 3000;  // matches lekiwi.py `max_raw`
   bool configure_motors_ = true;
+  // Feetech STS firmware often does not support SYNC READ (0x82); default to reading
+  // each motor's Present_Velocity with individual READ (0x02) so odometry works.
+  bool use_sync_read_ = false;
 
   FeetechBus bus_;
 };
