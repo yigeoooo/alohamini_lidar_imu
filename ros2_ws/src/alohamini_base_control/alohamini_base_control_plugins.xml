@@ -1,0 +1,23 @@
+<library path="alohamini_base_control">
+  <!-- ros2_control SystemInterface: talks Feetech protocol over serial. -->
+  <class
+    name="alohamini_base_control/AlohaMiniBaseHardware"
+    type="alohamini_base_control::AlohaMiniBaseHardware"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Hardware interface for the AlohaMini three-omniwheel base (Feetech STS3215,
+      velocity mode). Exposes per-wheel velocity command and velocity/position state.
+    </description>
+  </class>
+
+  <!-- Whole-body omni-drive controller: cmd_vel in, wheel velocities + odom out. -->
+  <class
+    name="alohamini_base_control/OmniBaseController"
+    type="alohamini_base_control::OmniBaseController"
+    base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Omni-drive controller mapping /cmd_vel to three wheel velocities and
+      publishing /odom (+ TF) from wheel velocity feedback.
+    </description>
+  </class>
+</library>
