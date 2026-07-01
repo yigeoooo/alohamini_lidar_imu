@@ -29,6 +29,7 @@ namespace alohamini_base_control
 namespace
 {
 constexpr std::uint8_t kHeader = 0xFF;
+constexpr std::uint8_t kInstRead = 0x02;
 constexpr std::uint8_t kInstWrite = 0x03;
 constexpr std::uint8_t kInstSyncRead = 0x82;
 constexpr std::uint8_t kInstSyncWrite = 0x83;
@@ -137,6 +138,23 @@ std::vector<std::uint8_t> buildSyncReadPacket(
   body.push_back(address);
   body.push_back(data_len);
   body.insert(body.end(), ids.begin(), ids.end());
+
+  std::vector<std::uint8_t> packet{kHeader, kHeader};
+  packet.insert(packet.end(), body.begin(), body.end());
+  packet.push_back(checksum(body));
+  return packet;
+}
+
+std::vector<std::uint8_t> buildReadPacket(
+  std::uint8_t motor_id, std::uint8_t address, std::uint8_t data_len)
+{
+  // FF FF ID LEN(=4) INST(0x02) ADDR DATALEN CHK
+  std::vector<std::uint8_t> body;
+  body.push_back(motor_id);
+  body.push_back(4);
+  body.push_back(kInstRead);
+  body.push_back(address);
+  body.push_back(data_len);
 
   std::vector<std::uint8_t> packet{kHeader, kHeader};
   packet.insert(packet.end(), body.begin(), body.end());
@@ -368,6 +386,54 @@ bool FeetechBus::syncReadPresentVelocity(
   }
   if (!all_ok) {
     last_error_ = "sync read: missing or corrupt replies";
+  }
+  return all_ok;
+}
+
+bool FeetechBus::readWord(std::uint8_t motor_id, std::uint8_t address, std::uint16_t & value)
+{
+  if (fd_ < 0) {
+    last_error_ = "port not open";
+    return false;
+  }
+  tcflush(fd_, TCIFLUSH);
+  if (!writeAll(buildReadPacket(motor_id, address, 2))) {
+    return false;
+  }
+  // Reply status packet: FF FF ID LEN(=4) ERR D0 D1 CHK  => 8 bytes.
+  std::vector<std::uint8_t> buf;
+  readExact(8, buf, timeout_ms_);
+
+  for (std::size_t i = 0; i + 8 <= buf.size(); ++i) {
+    if (buf[i] != kHeader || buf[i + 1] != kHeader) {
+      continue;
+    }
+    if (buf[i + 2] != motor_id || buf[i + 3] != 4) {
+      continue;
+    }
+    std::vector<std::uint8_t> body(buf.begin() + i + 2, buf.begin() + i + 7);
+    if (buf[i + 7] != checksum(body)) {
+      continue;
+    }
+    value = static_cast<std::uint16_t>(buf[i + 5] | (buf[i + 6] << 8));
+    return true;
+  }
+  last_error_ = "read: no valid reply from motor " + std::to_string(motor_id);
+  return false;
+}
+
+bool FeetechBus::readPresentVelocityIndividually(
+  const std::vector<std::uint8_t> & ids, std::vector<std::int16_t> & out)
+{
+  out.assign(ids.size(), 0);
+  bool all_ok = true;
+  for (std::size_t k = 0; k < ids.size(); ++k) {
+    std::uint16_t raw_enc = 0;
+    if (readWord(ids[k], reg::kPresentVelocity, raw_enc)) {
+      out[k] = static_cast<std::int16_t>(decodeSignMagnitude(raw_enc, 15));
+    } else {
+      all_ok = false;
+    }
   }
   return all_ok;
 }
