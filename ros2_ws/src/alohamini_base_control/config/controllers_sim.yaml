@@ -1,0 +1,56 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 50  # Hz
+    use_sim_time: true
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    omni_base_controller:
+      type: alohamini_base_control/OmniBaseController
+
+joint_state_broadcaster:
+  ros__parameters:
+    use_sim_time: true
+    joints:
+      - wheel1_joint
+      - wheel2_joint
+      - wheel3_joint
+    interfaces:
+      - position
+      - velocity
+
+omni_base_controller:
+  ros__parameters:
+    use_sim_time: true
+    # wheel1_joint -> left (240 deg), wheel2_joint -> right (120 deg),
+    # wheel3_joint -> back (0 deg). Same mapping as the real-hardware config;
+    # the _joint suffix avoids a Gazebo joint/link name collision.
+    wheel_names:
+      - wheel1_joint
+      - wheel2_joint
+      - wheel3_joint
+    wheel_angles_deg: [240.0, 120.0, 0.0]
+    angle_offset_deg: -90.0
+
+    wheel_radius: 0.05
+    base_radius: 0.125
+    max_wheel_raw: 3000
+
+    cmd_vel_topic: /cmd_vel
+    odom_topic: /odom
+    odom_frame: odom
+    base_frame: base_link
+    publish_tf: true
+    use_stamped_vel: false
+
+    cmd_timeout: 0.5
+
+    max_linear_speed: 0.20
+    max_lateral_speed: 0.20
+    max_angular_speed: 0.8
+
+    pose_covariance_xy: 0.10
+    pose_covariance_yaw: 0.25
+    twist_covariance_xy: 0.20
+    twist_covariance_yaw: 0.35
