@@ -12,7 +12,8 @@ alohamini_lidar_imu/
 ├── ros2_ws/
 │   └── src/
 │       ├── alohamini_description/  # AlohaMini 机器人模型和雷达 / IMU TF
-│       ├── alohamini_nav_bridge/   # /cmd_vel <-> AlohaMini ZMQ host 桥接
+│       ├── alohamini_nav_bridge/   # 旧 /cmd_vel <-> AlohaMini ZMQ host 桥接
+│       ├── alohamini_base_control/ # 推荐 ros2_control 底盘串口驱动
 │       └── alohamini_bringup/      # SLAM、Nav2、RViz、传感器过滤启动入口
 └── docs/
     ├── INSTALL.md                  # 树莓派依赖、镜像 pull 和容器创建
@@ -29,14 +30,15 @@ alohamini_lidar_imu/
 
 ## 当前配置
 
-- 树莓派 IP：`192.168.10.29`
+- 树莓派 IP：`192.168.10.157`
 - micro-ROS Agent UDP 端口：`8090`
 - ROS Domain ID：`5`
 - 原始雷达话题：`/scan`
 - 建图 / 导航雷达话题：`/scan_filtered`，由 `scan_sector_filter` 发布；默认只保留前方 `[-90°, +90°]` 扇区
 - IMU 话题：`/imu`
-- bridge 原始里程计：`/wheel/odom`，由 EKF 融合后输出 `/odom` 和 `odom -> base_link` TF
-- 速度命令链路：Nav2/teleop 发布 `/cmd_vel`，`collision_monitor` 输出 `/cmd_vel_safe`，bridge 订阅 `/cmd_vel_safe`
+- 推荐底盘驱动：`alohamini_base_control` ros2_control，直接发布 `/odom` 和 `odom -> base_link` TF
+- 推荐速度命令链路：Nav2/teleop 发布 `/cmd_vel`，`OmniBaseController` 直接驱动 Feetech 底盘轮
+- 旧 ZMQ bridge 备用链路：bridge 发布 `/wheel/odom`，由 EKF 融合后输出 `/odom` 和 TF；bridge 订阅 `/cmd_vel_safe`
 - 雷达 frame：`laser_frame`
 - IMU frame：`imu_frame`
 - AlohaMini ZMQ 命令端口：`5555`
@@ -82,4 +84,4 @@ ros2_ws/src/alohamini_description/urdf/alohamini_nav.urdf
 </joint>
 ```
 
-Nav2 当前按前向导航配置：局部规划器不采样横移和倒退，默认行为树不包含 BackUp recovery，bridge 也会拦截负 `linear.x` 与横向 `linear.y`；需要去后方目标时先原地转身再前进。`robot_localization` EKF 只融合 bridge 原始 odom twist 与 IMU yaw rate，`collision_monitor` 只做前向 slow/stop 急停保护。
+Nav2 当前按前向导航配置：局部规划器不采样横移和倒退，默认行为树不包含 BackUp recovery；需要去后方目标时先原地转身再前进。推荐链路由 `alohamini_base_control` 直接发布 `/odom` 与 `odom -> base_link` TF。旧 ZMQ bridge 备用链路仍可通过 `sensors_bridge.launch.py` 使用 EKF、`/wheel/odom` 和 `/cmd_vel_safe`。

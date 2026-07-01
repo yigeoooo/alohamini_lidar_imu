@@ -46,7 +46,7 @@ class ScanSectorFilter(Node):
         self._warned_intensity_length = False
         self._warned_invalid_ranges = False
 
-        self.publisher = self.create_publisher(LaserScan, self.output_topic, 10)
+        self.publisher = self.create_publisher(LaserScan, self.output_topic, qos_profile_sensor_data)
         self.subscription = self.create_subscription(
             LaserScan,
             self.input_topic,

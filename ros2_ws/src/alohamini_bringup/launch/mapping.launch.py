@@ -21,6 +21,8 @@ def generate_launch_description():
     allow_reverse = LaunchConfiguration("allow_reverse")
     allow_lateral_motion = LaunchConfiguration("allow_lateral_motion")
     require_observation_for_motion = LaunchConfiguration("require_observation_for_motion")
+    use_commanded_yaw_for_odom = LaunchConfiguration("use_commanded_yaw_for_odom")
+    commanded_yaw_odom_scale = LaunchConfiguration("commanded_yaw_odom_scale")
 
     sensors_bridge_launch = PathJoinSubstitution(
         [FindPackageShare("alohamini_bringup"), "launch", "sensors_bridge.launch.py"]
@@ -45,9 +47,11 @@ def generate_launch_description():
             DeclareLaunchArgument("odom_linear_y_scale", default_value="1.0"),
             DeclareLaunchArgument("odom_angular_z_scale", default_value="1.0"),
             DeclareLaunchArgument("swap_xy", default_value="false"),
-            DeclareLaunchArgument("allow_reverse", default_value="false"),
-            DeclareLaunchArgument("allow_lateral_motion", default_value="false"),
+            DeclareLaunchArgument("allow_reverse", default_value="true"),
+            DeclareLaunchArgument("allow_lateral_motion", default_value="true"),
             DeclareLaunchArgument("require_observation_for_motion", default_value="false"),
+            DeclareLaunchArgument("use_commanded_yaw_for_odom", default_value="true"),
+            DeclareLaunchArgument("commanded_yaw_odom_scale", default_value="0.95"),
             DeclareLaunchArgument("slam_params_file", default_value=default_slam_params),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(sensors_bridge_launch),
@@ -56,6 +60,9 @@ def generate_launch_description():
                     "cmd_port": cmd_port,
                     "obs_port": obs_port,
                     "use_joint_state_publisher": use_joint_state_publisher,
+                    "bridge_cmd_vel_topic": "/cmd_vel",
+                    "enable_scan_filter": "true",
+                    "enable_collision_monitor": "false",
                     "linear_x_scale": linear_x_scale,
                     "linear_y_scale": linear_y_scale,
                     "angular_z_scale": angular_z_scale,
@@ -66,6 +73,8 @@ def generate_launch_description():
                     "allow_reverse": allow_reverse,
                     "allow_lateral_motion": allow_lateral_motion,
                     "require_observation_for_motion": require_observation_for_motion,
+                    "use_commanded_yaw_for_odom": use_commanded_yaw_for_odom,
+                    "commanded_yaw_odom_scale": commanded_yaw_odom_scale,
                 }.items(),
             ),
             IncludeLaunchDescription(

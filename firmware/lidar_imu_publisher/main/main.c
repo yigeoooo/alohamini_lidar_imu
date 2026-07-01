@@ -55,6 +55,7 @@
 #error "LIDAR_POINT_COUNT must match MS200_POINT_MAX"
 #endif
 #define LIDAR_PUBLISH_PERIOD_MS 90
+#define EXECUTOR_SPIN_TIMEOUT_MS 5
 #define DEG_TO_RAD (M_PI / 180.0)
 #define STANDARD_GRAVITY 9.80665
 #define IMU_ANGULAR_VELOCITY_VARIANCE 0.01
@@ -169,14 +170,6 @@ static void lidar_update_data_task(void *arg)
         for (int i = 0; i < MS200_POINT_MAX; i++)
         {
             uint16_t index = (MS200_POINT_MAX - i) % MS200_POINT_MAX;
-            if (index >= 180)
-            {
-                index = (index - 180) % MS200_POINT_MAX;
-            }
-            else
-            {
-                index = (index + 180) % MS200_POINT_MAX;
-            }
 
             uint16_t distance_mm = lidar_snapshot.points[index].distance;
             float distance_m = (float)distance_mm / 1000.0f;
@@ -390,7 +383,7 @@ static void micro_ros_task(void *arg)
 
     while (1)
     {
-        rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100));
+        rclc_executor_spin_some(&executor, RCL_MS_TO_NS(EXECUTOR_SPIN_TIMEOUT_MS));
         maybe_sync_time();
         usleep(1000);
     }

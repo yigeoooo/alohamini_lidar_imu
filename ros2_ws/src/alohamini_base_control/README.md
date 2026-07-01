@@ -265,10 +265,10 @@ launch 还会设 `GAZEBO_MODEL_DATABASE_URI=""`，避免 gzserver 启动时卡�
 
 ## 行为说明 / 注意点
 
-- **里程计 x/y 符号继承自 `lekiwi.py`**：正运动学用 `velocity_vector = [-x, -y, theta]`，
-  而逆运动学没有再取反，所以从轮速反馈恢复出的 body 速度（以及积分出的 odom 平移）相对
-  `/cmd_vel` 是取反的。这是对原驱动的忠实复刻。若需要 odom 平移与 `/cmd_vel` 符号一致，
-  可在下游翻转或调整运动学——但轮子命令本身是对的，机器人实际朝命令方向运动。
+- **里程计 x/y 符号已按 REP-103 还原**：正向控制仍复刻 `lekiwi.py` 的
+  `velocity_vector = [-x, -y, theta]`，保证轮子命令与原 AlohaMini 遥操一致；反向从
+  轮速反馈恢复 body 速度时会对 x/y 再取负，和 LeRobot `_wheel_raw_to_body()` 一致，
+  因此 `/odom` 平移方向与 `/cmd_vel` 和实车运动方向一致。
 - **每轮转向符号需在实机确认**：电机 ID 和运动学角都是 `config/controllers.yaml` 与
   xacro 里的参数，改动无需重新编译。
 - 在 `u_2204`（Humble）验证：两个控制器都到 `active`，三个 `wheelN/velocity` 命令接口

@@ -61,17 +61,18 @@ source /root/ws/install/setup.bash
 
 ```text
 alohamini_description
+alohamini_base_control
 alohamini_nav_bridge
 alohamini_bringup
 ```
 
-## 5. 当前阶段检查：传感器、TF、odom、bridge（首次联调或故障排查）
+## 5. 当前阶段检查：传感器、TF、odom、底盘驱动（首次联调或故障排查）
 
-这一节只是独立检查，不是建图或导航时必须额外运行的步骤。`mapping.launch.py` 和 `navigation.launch.py` 都会自动包含 `sensors_bridge.launch.py`，因此建图或导航运行时不要再单独启动本节的 `sensors_bridge.launch.py`，否则会重复启动 bridge、robot_state_publisher 和 scan filter。
+这一节只是独立检查，不是建图或导航时必须额外运行的步骤。`mapping_ros2_control.launch.py` 和 `navigation_ros2_control.launch.py` 都会自动包含 `sensors_ros2_control.launch.py`，因此建图或导航运行时不要再单独启动本节的 sensors launch。
 
 以后命令均在树莓派端执行。
 
-先确认 LeRobot host 和 micro-ROS Agent 都已经运行。
+先确认 micro-ROS Agent 已运行；使用 ros2_control 时不要同时运行 LeRobot host，避免抢同一条 Feetech 串口。
 
 在 `alohamini_nav2` 容器内启动基础 bringup：
 
@@ -80,16 +81,18 @@ source /opt/ros/humble/setup.bash
 source /root/ws/install/setup.bash
 export ROS_DOMAIN_ID=5
 
+ros2 launch alohamini_bringup sensors_ros2_control.launch.py serial_port:=/dev/ttyACM0
+```
+
+默认 `/scan_filtered` 只保留 `/scan` 的前方 `[-90°, +90°]` 扇区，避开前置雷达被机身遮挡的后方数据；只有现场确认雷达无遮挡时，才覆盖 `scan_min_angle` / `scan_max_angle` 扩大扇区。`sensors_ros2_control.launch.py` 会启动 `alohamini_base_control`，由 `OmniBaseController` 发布 `/odom` 和 `odom -> base_link` TF。
+
+旧 ZMQ bridge 备用检查命令：
+
+```bash
 ros2 launch alohamini_bringup sensors_bridge.launch.py host:=127.0.0.1
 ```
 
-默认 `/scan_filtered` 只保留 `/scan` 的前方 `[-90°, +90°]` 扇区，避开前置雷达被机身遮挡的后方数据；只有现场确认雷达无遮挡时，才覆盖 `scan_min_angle` / `scan_max_angle` 扩大扇区。`sensors_bridge.launch.py` 还会启动 EKF 和前向 collision monitor：bridge 发布 `/wheel/odom`，EKF 融合 `/wheel/odom` twist 与 `/imu` yaw rate 后发布 `/odom` 和 `odom -> base_link` TF；原始 `/cmd_vel` 先进入 collision monitor，过滤后通过 `/cmd_vel_safe` 给 bridge。
-
-如果 ZMQ loopback 不通，用树莓派 IP：
-
-```bash
-ros2 launch alohamini_bringup sensors_bridge.launch.py host:=192.168.10.29
-```
+如果 ZMQ loopback 不通，可把 host 换成树莓派 IP：`host:=192.168.10.157`。
 
 另开一个容器 shell 检查：
 
@@ -114,7 +117,7 @@ ros2 run tf2_ros tf2_echo odom base_link
 
 ### 方式 A：带键盘保存的建图会话
 
-推荐现场使用这个方式。它会启动 `mapping.launch.py`，同时提供按键保存地图：
+推荐现场使用这个方式。默认启动 `mapping_ros2_control.launch.py`，同时提供按键保存地图：
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -122,7 +125,7 @@ source /root/ws/install/setup.bash
 export ROS_DOMAIN_ID=5
 
 ros2 run alohamini_bringup alohamini_mapping_session \
-  --host 127.0.0.1 \
+  --serial-port /dev/ttyACM0 \
   --map /root/ws/maps/alohamini_map
 ```
 
@@ -131,26 +134,26 @@ ros2 run alohamini_bringup alohamini_mapping_session \
 ```text
 w           前进
 a / d       原地左转 / 原地右转
-s           后退（默认被 bridge 拦截，需 `--allow-reverse`）
-z / x       左移 / 右移（默认被 bridge 拦截，需 `--allow-lateral-motion`）
+s           后退
+z / x       左移 / 右移
 r / f       加速 / 减速
 Space 或 0  发送一次零速 /cmd_vel
 Shift+S     保存当前地图，建图继续运行
-Shift+X     保存当前地图，保存成功后停止 mapping.launch.py 并退出
-q           不保存，停止 mapping.launch.py 并退出
-Ctrl+C      不保存，停止 mapping.launch.py 并退出
+Shift+X     保存当前地图，保存成功后停止建图 launch 并退出
+q           不保存，停止建图 launch 并退出
+Ctrl+C      不保存，停止建图 launch 并退出
 ```
 
-### 方式 B：直接启动 mapping.launch.py
+### 方式 B：直接启动 mapping_ros2_control.launch.py
 
-这种方式更接近 ROS 原生命令。保存地图时需要另开一个容器 shell 执行 `map_saver_cli`。
+这种方式更接近 ROS 原生命令。保存地图时需要另开一个容器 shell 执行 `map_saver_cli`。旧 ZMQ bridge 路径仍可用：`mapping.launch.py host:=127.0.0.1`，但建图优先使用 ros2_control。
 
 ```bash
 source /opt/ros/humble/setup.bash
 source /root/ws/install/setup.bash
 export ROS_DOMAIN_ID=5
 
-ros2 launch alohamini_bringup mapping.launch.py host:=127.0.0.1
+ros2 launch alohamini_bringup mapping_ros2_control.launch.py serial_port:=/dev/ttyACM0
 ```
 
 另开 shell 进入容器检查建图输出：
@@ -174,20 +177,20 @@ ros2 topic echo /map --once
 
 ```text
 Shift+S  保存当前地图，建图继续运行
-Shift+X  保存当前地图，保存成功后停止 mapping.launch.py 并退出
+Shift+X  保存当前地图，保存成功后停止建图 launch 并退出
 ```
 
-### 如果直接使用 `mapping.launch.py`
+### 如果直接使用 `mapping_ros2_control.launch.py`
 
 需要另开一个终端执行保存命令，并且保存时不要先关闭建图 launch。
 
 正确顺序：
 
 ```text
-1. mapping.launch.py 继续运行。
+1. 建图 launch 继续运行。
 2. 新开一个 alohamini_nav2 容器 shell。
 3. 执行 map_saver_cli 保存地图。
-4. 看到保存成功后，再回到建图终端 Ctrl+C 停止 mapping.launch.py。
+4. 看到保存成功后，再回到建图终端 Ctrl+C 停止建图 launch。
 ```
 
 `Ctrl+C` 只会退出建图进程，不会自动保存地图；只有 `alohamini_mapping_session` 的 `Shift+X` 会执行“保存成功后退出”。
@@ -226,14 +229,14 @@ source /opt/ros/humble/setup.bash
 source /root/ws/install/setup.bash
 export ROS_DOMAIN_ID=5
 
-ros2 launch alohamini_bringup navigation.launch.py \
-  host:=127.0.0.1 \
+ros2 launch alohamini_bringup navigation_ros2_control.launch.py \
+  serial_port:=/dev/ttyACM0 \
   map:=/root/ws/maps/alohamini_map.yaml
 ```
 
-导航阶段由 AMCL 发布 `map -> odom`，EKF 发布 `odom -> base_link`，Nav2 发布 `/cmd_vel`，`collision_monitor` 过滤成 `/cmd_vel_safe` 后由 bridge 转成 ZMQ 速度给 LeRobot host。
+导航阶段由 AMCL 发布 `map -> odom`，`OmniBaseController` 发布 `odom -> base_link`，Nav2 发布 `/cmd_vel` 后直接驱动 ros2_control 底盘控制器。
 
-当前 Nav2 参数按前向导航配置，局部规划器和速度平滑器只允许前进和原地旋转；默认行为树不包含 BackUp recovery，bridge 也会拦截倒退和横移命令。需要去后方目标时让机器人先转身，再向前行驶；初次导航应先用低速短距离目标观察 local costmap、LaserScan、EKF `/odom` 和 collision monitor 的 `/cmd_vel_safe`。
+当前 Nav2 参数按前向导航配置，局部规划器和速度平滑器只允许前进和原地旋转；默认行为树不包含 BackUp recovery。需要去后方目标时让机器人先转身，再向前行驶；初次导航应先用低速短距离目标观察 local costmap、LaserScan 和 `/odom`。
 
 ### 8.1 怎么确认起点和终点
 
@@ -378,7 +381,7 @@ ros2 launch alohamini_bringup rviz.launch.py
 
 ### 9.3 RViz 连接检查
 
-这个 launch 会打开 `ros2_ws/src/alohamini_bringup/rviz/alohamini_nav.rviz`。本机 RViz 只负责可视化和发送初始位姿/导航目标，不需要在本机启动 `sensors_bridge.launch.py`、`mapping.launch.py` 或 `navigation.launch.py`。
+这个 launch 会打开 `ros2_ws/src/alohamini_bringup/rviz/alohamini_nav.rviz`。本机 RViz 只负责可视化和发送初始位姿/导航目标，不需要在本机启动 `sensors_ros2_control.launch.py`、`mapping_ros2_control.launch.py` 或 `navigation_ros2_control.launch.py`。
 
 如果本机看不到树莓派上的话题，先检查：
 

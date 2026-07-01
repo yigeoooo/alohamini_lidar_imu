@@ -21,6 +21,8 @@ def generate_launch_description():
     allow_reverse = LaunchConfiguration("allow_reverse")
     allow_lateral_motion = LaunchConfiguration("allow_lateral_motion")
     require_observation_for_motion = LaunchConfiguration("require_observation_for_motion")
+    use_commanded_yaw_for_odom = LaunchConfiguration("use_commanded_yaw_for_odom")
+    commanded_yaw_odom_scale = LaunchConfiguration("commanded_yaw_odom_scale")
 
     return LaunchDescription(
         [
@@ -40,6 +42,8 @@ def generate_launch_description():
             DeclareLaunchArgument("allow_reverse", default_value="false"),
             DeclareLaunchArgument("allow_lateral_motion", default_value="false"),
             DeclareLaunchArgument("require_observation_for_motion", default_value="true"),
+            DeclareLaunchArgument("use_commanded_yaw_for_odom", default_value="false"),
+            DeclareLaunchArgument("commanded_yaw_odom_scale", default_value="1.0"),
             Node(
                 package="alohamini_nav_bridge",
                 executable="bridge_node",
@@ -71,6 +75,8 @@ def generate_launch_description():
                         "allow_reverse": allow_reverse,
                         "allow_lateral_motion": allow_lateral_motion,
                         "require_observation_for_motion": require_observation_for_motion,
+                        "use_commanded_yaw_for_odom": use_commanded_yaw_for_odom,
+                        "commanded_yaw_odom_scale": commanded_yaw_odom_scale,
                         "pose_covariance_xy": 0.10,
                         "pose_covariance_yaw": 0.25,
                         "twist_covariance_xy": 0.20,

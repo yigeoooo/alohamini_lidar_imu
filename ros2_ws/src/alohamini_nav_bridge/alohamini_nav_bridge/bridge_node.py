@@ -65,6 +65,8 @@ class AlohaMiniNavBridge(Node):
         self.declare_parameter("allow_reverse", False)
         self.declare_parameter("allow_lateral_motion", False)
         self.declare_parameter("require_observation_for_motion", True)
+        self.declare_parameter("use_commanded_yaw_for_odom", False)
+        self.declare_parameter("commanded_yaw_odom_scale", 1.0)
         self.declare_parameter("pose_covariance_xy", 0.10)
         self.declare_parameter("pose_covariance_yaw", 0.25)
         self.declare_parameter("twist_covariance_xy", 0.20)
@@ -92,6 +94,8 @@ class AlohaMiniNavBridge(Node):
         self.allow_reverse = as_bool(self.get_parameter("allow_reverse").value)
         self.allow_lateral_motion = as_bool(self.get_parameter("allow_lateral_motion").value)
         self.require_observation_for_motion = as_bool(self.get_parameter("require_observation_for_motion").value)
+        self.use_commanded_yaw_for_odom = as_bool(self.get_parameter("use_commanded_yaw_for_odom").value)
+        self.commanded_yaw_odom_scale = float(self.get_parameter("commanded_yaw_odom_scale").value)
         self.pose_covariance_xy = float(self.get_parameter("pose_covariance_xy").value)
         self.pose_covariance_yaw = float(self.get_parameter("pose_covariance_yaw").value)
         self.twist_covariance_xy = float(self.get_parameter("twist_covariance_xy").value)
@@ -106,7 +110,8 @@ class AlohaMiniNavBridge(Node):
         self.obs_socket.setsockopt(zmq.CONFLATE, 1)
         self.obs_socket.connect(f"tcp://{self.host}:{self.obs_port}")
 
-        self.cmd = BodyVelocity()
+        self.cmd_ros = BodyVelocity()
+        self.cmd_host = BodyVelocity()
         self.observed = BodyVelocity()
         self.last_cmd_time = self.get_clock().now()
         self.last_obs_time = None
@@ -138,11 +143,17 @@ class AlohaMiniNavBridge(Node):
         if not self.allow_lateral_motion:
             cmd_y = 0.0
 
-        ros_x = clamp(cmd_x, self.max_linear_speed) * self.linear_x_scale
-        ros_y = clamp(cmd_y, self.max_lateral_speed) * self.linear_y_scale
-        vx, vy = (ros_y, ros_x) if self.swap_xy else (ros_x, ros_y)
-        wz = clamp(float(msg.angular.z), self.max_angular_speed) * self.angular_z_scale
-        self.cmd = BodyVelocity(x=vx, y=vy, yaw=wz)
+        ros_x = clamp(cmd_x, self.max_linear_speed)
+        ros_y = clamp(cmd_y, self.max_lateral_speed)
+        ros_yaw = clamp(float(msg.angular.z), self.max_angular_speed)
+
+        host_x = ros_x * self.linear_x_scale
+        host_y = ros_y * self.linear_y_scale
+        host_x, host_y = (host_y, host_x) if self.swap_xy else (host_x, host_y)
+        host_yaw = ros_yaw * self.angular_z_scale
+
+        self.cmd_ros = BodyVelocity(x=ros_x, y=ros_y, yaw=ros_yaw)
+        self.cmd_host = BodyVelocity(x=host_x, y=host_y, yaw=host_yaw)
         self.last_cmd_time = self.get_clock().now()
 
     def on_timer(self) -> None:
@@ -200,10 +211,16 @@ class AlohaMiniNavBridge(Node):
         age = (now - self.last_obs_time).nanoseconds * 1e-9
         return age <= self.obs_timeout_sec
 
+    def has_fresh_command(self, now) -> bool:
+        cmd_age = (now - self.last_cmd_time).nanoseconds * 1e-9
+        return cmd_age <= self.cmd_timeout_sec
+
     def current_observed_velocity(self, now) -> BodyVelocity:
-        if not self.has_fresh_observation(now):
-            return BodyVelocity()
-        return self.observed
+        velocity = self.observed if self.has_fresh_observation(now) else BodyVelocity()
+        if self.use_commanded_yaw_for_odom:
+            yaw = self.cmd_ros.yaw * self.commanded_yaw_odom_scale if self.has_fresh_command(now) else 0.0
+            velocity = BodyVelocity(x=velocity.x, y=velocity.y, yaw=yaw)
+        return velocity
 
     def publish_odom(self, now) -> None:
         velocity = self.current_observed_velocity(now)
@@ -249,7 +266,7 @@ class AlohaMiniNavBridge(Node):
     def send_command(self, now) -> None:
         cmd_age = (now - self.last_cmd_time).nanoseconds * 1e-9
         obs_ready = self.has_fresh_observation(now) or not self.require_observation_for_motion
-        command = self.cmd if cmd_age <= self.cmd_timeout_sec and obs_ready else BodyVelocity()
+        command = self.cmd_host if cmd_age <= self.cmd_timeout_sec and obs_ready else BodyVelocity()
         payload = {
             "x.vel": command.x,
             "y.vel": command.y,

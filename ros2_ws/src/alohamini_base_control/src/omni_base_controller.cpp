@@ -129,10 +129,12 @@ OmniBaseController::BodyVelocity OmniBaseController::wheelToBody(
     wheel_linear[i] = wheel_radps[i] * wheel_radius_;
   }
   BodyVelocity v;
-  v.x = m_inv_[0][0] * wheel_linear[0] + m_inv_[0][1] * wheel_linear[1] +
-    m_inv_[0][2] * wheel_linear[2];
-  v.y = m_inv_[1][0] * wheel_linear[0] + m_inv_[1][1] * wheel_linear[1] +
-    m_inv_[1][2] * wheel_linear[2];
+  // bodyToWheel() mirrors the AlohaMini LeRobot driver and feeds [-x, -y, yaw]
+  // into the kinematic matrix. Invert that convention here so odom is REP-103.
+  v.x = -(m_inv_[0][0] * wheel_linear[0] + m_inv_[0][1] * wheel_linear[1] +
+    m_inv_[0][2] * wheel_linear[2]);
+  v.y = -(m_inv_[1][0] * wheel_linear[0] + m_inv_[1][1] * wheel_linear[1] +
+    m_inv_[1][2] * wheel_linear[2]);
   v.yaw = m_inv_[2][0] * wheel_linear[0] + m_inv_[2][1] * wheel_linear[1] +
     m_inv_[2][2] * wheel_linear[2];
   return v;

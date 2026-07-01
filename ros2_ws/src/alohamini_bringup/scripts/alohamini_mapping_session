@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Interactive AlohaMini mapping session helper.
 
-This wrapper starts mapping.launch.py and provides keyboard teleop controls:
+This wrapper starts mapping_ros2_control.launch.py by default and provides keyboard teleop controls:
+Use --driver zmq to run the old mapping.launch.py ZMQ bridge path.
   w: forward
   a/d: rotate left/right
-  s: backward only with --allow-reverse
-  z/x: strafe only with --allow-lateral-motion
+  s: backward
+  z/x: strafe left/right
   r/f: speed up/down
   Space: stop and publish zero /cmd_vel
   Shift+S: save the current map and keep mapping
-  Shift+X: save the current map, then stop mapping.launch.py
-  q: stop mapping.launch.py without saving
+  Shift+X: save the current map, then stop mapping launch
+  q: stop mapping launch without saving
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ SPEED_LEVELS = [
 ]
 
 # Repeated key events refresh the active command. After key repeat stops,
-# publish one zero command locally before the bridge watchdog times out.
+# publish one zero command locally before the active driver watchdog times out.
 CONTROL_PERIOD_SEC = 0.05
 KEY_REPEAT_TIMEOUT_SEC = 0.35
 
@@ -65,6 +66,20 @@ def str_bool(value: bool) -> str:
 
 
 def build_mapping_command(args: argparse.Namespace) -> list[str]:
+    if args.driver == "ros2_control":
+        cmd = [
+            "ros2",
+            "launch",
+            "alohamini_bringup",
+            "mapping_ros2_control.launch.py",
+            f"serial_port:={args.serial_port}",
+            f"baud_rate:={args.baud_rate}",
+            f"use_mock_hardware:={str_bool(args.use_mock_hardware)}",
+        ]
+        if args.slam_params_file:
+            cmd.append(f"slam_params_file:={args.slam_params_file}")
+        return cmd
+
     cmd = [
         "ros2",
         "launch",
@@ -84,28 +99,31 @@ def build_mapping_command(args: argparse.Namespace) -> list[str]:
         f"allow_reverse:={str_bool(args.allow_reverse)}",
         f"allow_lateral_motion:={str_bool(args.allow_lateral_motion)}",
         f"require_observation_for_motion:={str_bool(args.require_observation_for_motion)}",
+        "use_commanded_yaw_for_odom:=true",
+        f"commanded_yaw_odom_scale:={args.commanded_yaw_odom_scale}",
     ]
     if args.slam_params_file:
         cmd.append(f"slam_params_file:={args.slam_params_file}")
     return cmd
 
 
-def print_controls(map_stem: str, speed_index: int) -> None:
+def print_controls(map_stem: str, speed_index: int, driver: str) -> None:
     speed = SPEED_LEVELS[speed_index]
     print(
         "\nAlohaMini mapping session controls:\n"
         "  w  forward\n"
         "  a/d  rotate left/right\n"
-        "  s  backward (blocked unless --allow-reverse)\n"
-        "  z/x  strafe left/right (blocked unless --allow-lateral-motion)\n"
+        "  s  backward\n"
+        "  z/x  strafe left/right\n"
         "  r/f  speed up/down\n"
         "  Space or 0  stop and publish zero /cmd_vel\n"
         f"  Shift+S  save map to {map_stem}.yaml/.pgm and keep mapping\n"
-        "  Shift+X  save map, then stop mapping.launch.py and exit\n"
-        "  q  stop mapping.launch.py without saving\n"
+        "  Shift+X  save map, then stop mapping launch and exit\n"
+        "  q  stop mapping launch without saving\n"
         "  h  show this help\n"
-        "  Ctrl+C  stop mapping.launch.py without saving\n"
-        f"\nCurrent speed: level {speed_index + 1}/{len(SPEED_LEVELS)} "
+        "  Ctrl+C  stop mapping launch without saving\n"
+        f"\nDriver: {driver}\n"
+        f"Current speed: level {speed_index + 1}/{len(SPEED_LEVELS)} "
         f"xy={speed['xy']:.2f} m/s theta={speed['theta']:.2f} rad/s\n",
         flush=True,
     )
@@ -153,7 +171,7 @@ def publish_zero_cmd_vel(publisher) -> None:
 def stop_process(process: subprocess.Popen[bytes]) -> None:
     if process.poll() is not None:
         return
-    print("\n[session] stopping mapping.launch.py", flush=True)
+    print("\n[session] stopping mapping launch", flush=True)
     try:
         os.killpg(process.pid, signal.SIGINT)
     except ProcessLookupError:
@@ -197,9 +215,22 @@ def read_key(timeout_sec: float) -> str | None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run AlohaMini mapping with keyboard drive and map save controls.")
-    parser.add_argument("--host", default="127.0.0.1", help="AlohaMini ZMQ host passed to mapping.launch.py")
-    parser.add_argument("--cmd-port", default="5555", help="AlohaMini command ZMQ port")
-    parser.add_argument("--obs-port", default="5556", help="AlohaMini observation ZMQ port")
+    parser.add_argument(
+        "--driver",
+        choices=("ros2_control", "zmq"),
+        default="ros2_control",
+        help="Base driver to launch. Default uses alohamini_base_control directly; zmq uses the old lerobot host bridge.",
+    )
+    parser.add_argument("--serial-port", default="/dev/ttyACM0", help="ros2_control base serial port")
+    parser.add_argument("--baud-rate", default="1000000", help="ros2_control serial baud rate")
+    parser.add_argument(
+        "--use-mock-hardware",
+        action="store_true",
+        help="Run ros2_control with mock hardware instead of the real base serial bus.",
+    )
+    parser.add_argument("--host", default="127.0.0.1", help="ZMQ host used only with --driver zmq")
+    parser.add_argument("--cmd-port", default="5555", help="ZMQ command port used only with --driver zmq")
+    parser.add_argument("--obs-port", default="5556", help="ZMQ observation port used only with --driver zmq")
     parser.add_argument("--map", default="/root/ws/maps/alohamini_map", help="Map output stem or .yaml path")
     parser.add_argument("--slam-params-file", default="", help="Optional slam_toolbox params file")
     parser.add_argument("--linear-x-scale", default="1.0")
@@ -208,6 +239,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--odom-linear-x-scale", default="1.0")
     parser.add_argument("--odom-linear-y-scale", default="1.0")
     parser.add_argument("--odom-angular-z-scale", default="1.0")
+    parser.add_argument("--commanded-yaw-odom-scale", default="0.95")
     parser.add_argument(
         "--swap-xy",
         dest="swap_xy",
@@ -218,13 +250,29 @@ def parse_args() -> argparse.Namespace:
     parser.set_defaults(swap_xy=False)
     parser.add_argument(
         "--allow-reverse",
+        dest="allow_reverse",
         action="store_true",
-        help="Allow backward cmd_vel during mapping. Disabled by default for front-sector lidar.",
+        default=True,
+        help="Allow backward cmd_vel during mapping. Enabled by default.",
+    )
+    parser.add_argument(
+        "--no-reverse",
+        dest="allow_reverse",
+        action="store_false",
+        help="Block backward cmd_vel during mapping.",
     )
     parser.add_argument(
         "--allow-lateral-motion",
+        dest="allow_lateral_motion",
         action="store_true",
-        help="Allow lateral cmd_vel during mapping. Disabled by default for front-sector lidar.",
+        default=True,
+        help="Allow lateral cmd_vel during mapping. Enabled by default.",
+    )
+    parser.add_argument(
+        "--no-lateral-motion",
+        dest="allow_lateral_motion",
+        action="store_false",
+        help="Block lateral cmd_vel during mapping.",
     )
     parser.add_argument(
         "--require-observation-for-motion",
@@ -252,6 +300,10 @@ def find_running_mapping_nodes() -> list[str]:
     mapping_nodes = {
         "/alohamini_mapping_session_control",
         "/alohamini_nav_bridge",
+        "/controller_manager",
+        "/joint_state_publisher",
+        "/robot_state_publisher",
+        "/scan_sector_filter",
         "/async_slam_toolbox_node",
         "/slam_toolbox",
         "/amcl",
@@ -280,9 +332,9 @@ def main() -> int:
     existing_nodes = find_running_mapping_nodes()
     if existing_nodes:
         print(
-            "[session] existing mapping/navigation/bridge nodes are already running: "
+            "[session] existing mapping/navigation/base-control nodes are already running: "
             + ", ".join(existing_nodes)
-            + ". Stop the old mapping/navigation launch/session before starting a new one.",
+            + ". Stop the old mapping/navigation/base-control launch or session before starting a new one.",
             file=sys.stderr,
             flush=True,
         )
@@ -302,7 +354,7 @@ def main() -> int:
         tty.setcbreak(sys.stdin.fileno())
 
     speed_index = 0
-    print_controls(args.map, speed_index)
+    print_controls(args.map, speed_index, args.driver)
     exit_code = 0
     normal_key_exit = False
     active_key = None
@@ -332,7 +384,7 @@ def main() -> int:
                     publish_zero_cmd_vel(cmd_vel_pub)
                     last_control_publish_time = now
                 elif lower_key == "h":
-                    print_controls(args.map, speed_index)
+                    print_controls(args.map, speed_index, args.driver)
                 elif lower_key == "q":
                     normal_key_exit = True
                     active_key = None
@@ -341,14 +393,14 @@ def main() -> int:
                     break
                 elif lower_key == "r":
                     speed_index = min(speed_index + 1, len(SPEED_LEVELS) - 1)
-                    print_controls(args.map, speed_index)
+                    print_controls(args.map, speed_index, args.driver)
                     if active_key in MOVE_KEYS:
                         x_cmd, y_cmd, yaw_cmd, label = motion_for_key(active_key, speed_index, args.allow_reverse, args.allow_lateral_motion)
                         publish_cmd_vel(cmd_vel_pub, x_cmd, y_cmd, yaw_cmd, label)
                         last_control_publish_time = now
                 elif lower_key == "f":
                     speed_index = max(speed_index - 1, 0)
-                    print_controls(args.map, speed_index)
+                    print_controls(args.map, speed_index, args.driver)
                     if active_key in MOVE_KEYS:
                         x_cmd, y_cmd, yaw_cmd, label = motion_for_key(active_key, speed_index, args.allow_reverse, args.allow_lateral_motion)
                         publish_cmd_vel(cmd_vel_pub, x_cmd, y_cmd, yaw_cmd, label)

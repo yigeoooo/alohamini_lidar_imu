@@ -1,5 +1,6 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import LifecycleNode, Node
@@ -15,6 +16,8 @@ def generate_launch_description():
     bridge_odom_topic = LaunchConfiguration("bridge_odom_topic")
     bridge_publish_tf = LaunchConfiguration("bridge_publish_tf")
     ekf_params_file = LaunchConfiguration("ekf_params_file")
+    enable_scan_filter = LaunchConfiguration("enable_scan_filter")
+    enable_collision_monitor = LaunchConfiguration("enable_collision_monitor")
     collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
     linear_x_scale = LaunchConfiguration("linear_x_scale")
     linear_y_scale = LaunchConfiguration("linear_y_scale")
@@ -26,6 +29,8 @@ def generate_launch_description():
     allow_reverse = LaunchConfiguration("allow_reverse")
     allow_lateral_motion = LaunchConfiguration("allow_lateral_motion")
     require_observation_for_motion = LaunchConfiguration("require_observation_for_motion")
+    use_commanded_yaw_for_odom = LaunchConfiguration("use_commanded_yaw_for_odom")
+    commanded_yaw_odom_scale = LaunchConfiguration("commanded_yaw_odom_scale")
     scan_input_topic = LaunchConfiguration("scan_input_topic")
     scan_topic = LaunchConfiguration("scan_topic")
     scan_min_angle = LaunchConfiguration("scan_min_angle")
@@ -69,6 +74,16 @@ def generate_launch_description():
                 description="Disable bridge TF when EKF publishes odom->base_link.",
             ),
             DeclareLaunchArgument("ekf_params_file", default_value=default_ekf_params),
+            DeclareLaunchArgument(
+                "enable_scan_filter",
+                default_value="true",
+                description="Start scan_sector_filter for /scan_filtered consumers.",
+            ),
+            DeclareLaunchArgument(
+                "enable_collision_monitor",
+                default_value="true",
+                description="Start Nav2 collision monitor and publish /cmd_vel_safe.",
+            ),
             DeclareLaunchArgument("collision_monitor_params_file", default_value=default_collision_monitor_params),
             DeclareLaunchArgument(
                 "use_joint_state_publisher",
@@ -89,6 +104,8 @@ def generate_launch_description():
                 default_value="true",
                 description="Send zero velocity when AlohaMini host observations are stale.",
             ),
+            DeclareLaunchArgument("use_commanded_yaw_for_odom", default_value="false"),
+            DeclareLaunchArgument("commanded_yaw_odom_scale", default_value="1.0"),
             DeclareLaunchArgument("scan_input_topic", default_value="/scan"),
             DeclareLaunchArgument("scan_topic", default_value="/scan_filtered"),
             DeclareLaunchArgument(
@@ -120,6 +137,7 @@ def generate_launch_description():
                 executable="scan_sector_filter",
                 name="scan_sector_filter",
                 output="screen",
+                condition=IfCondition(enable_scan_filter),
                 parameters=[
                     {
                         "input_topic": scan_input_topic,
@@ -135,6 +153,7 @@ def generate_launch_description():
                 name="collision_monitor",
                 namespace="",
                 output="screen",
+                condition=IfCondition(enable_collision_monitor),
                 parameters=[collision_monitor_params_file],
             ),
             Node(
@@ -142,6 +161,7 @@ def generate_launch_description():
                 executable="lifecycle_manager",
                 name="lifecycle_manager_collision_monitor",
                 output="screen",
+                condition=IfCondition(enable_collision_monitor),
                 parameters=[
                     {
                         "use_sim_time": False,
@@ -169,6 +189,8 @@ def generate_launch_description():
                     "allow_reverse": allow_reverse,
                     "allow_lateral_motion": allow_lateral_motion,
                     "require_observation_for_motion": require_observation_for_motion,
+                    "use_commanded_yaw_for_odom": use_commanded_yaw_for_odom,
+                    "commanded_yaw_odom_scale": commanded_yaw_odom_scale,
                 }.items(),
             ),
         ]

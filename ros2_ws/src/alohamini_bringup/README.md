@@ -24,14 +24,22 @@ source ~/alohamini_lidar_imu/ros2_ws/install/setup.bash
 
 ### 建图
 
+推荐用带键盘和保存地图的会话脚本，默认就是 ros2_control：
+
 ```bash
-ros2 launch alohamini_bringup mapping_ros2_control.launch.py serial_port:=/dev/ttyACM0
+ros2 run alohamini_bringup alohamini_mapping_session \
+    --serial-port /dev/ttyACM0 \
+    --map ~/my_map
 ```
 
-建完用 slam_toolbox 存图（或用现成的 `scripts/alohamini_mapping_session`）：
+也可以直接启动 launch，再另开终端保存地图：
+
 ```bash
+ros2 launch alohamini_bringup mapping_ros2_control.launch.py serial_port:=/dev/ttyACM0
 ros2 run nav2_map_server map_saver_cli -f ~/my_map
 ```
+
+旧 ZMQ bridge 仍可用：`ros2 run alohamini_bringup alohamini_mapping_session --driver zmq --host 127.0.0.1 --map ~/my_map`。
 
 ### 导航
 
