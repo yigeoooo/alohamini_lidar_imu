@@ -75,6 +75,10 @@ std::vector<std::uint8_t> buildWritePacket(
 std::vector<std::uint8_t> buildSyncReadPacket(
   std::uint8_t address, std::uint8_t data_len, const std::vector<std::uint8_t> & ids);
 
+// Build a READ (0x02) packet requesting `data_len` bytes at `address` from one motor.
+std::vector<std::uint8_t> buildReadPacket(
+  std::uint8_t motor_id, std::uint8_t address, std::uint8_t data_len);
+
 // Thin termios-based serial transport speaking Feetech protocol 0.
 // Intentionally free of any ROS dependency so it can be unit-tested standalone.
 class FeetechBus
@@ -104,6 +108,18 @@ public:
   // mark the call as failed.
   bool syncReadPresentVelocity(
     const std::vector<std::uint8_t> & ids, std::vector<std::int16_t> & out);
+
+  // Read Present_Velocity (addr 58) from each motor with individual READ (0x02)
+  // instructions instead of one SYNC READ. Slower, but many Feetech STS firmwares
+  // do not support SYNC READ (0x82) — writes still work (broadcast, no reply), so
+  // the wheels spin but SYNC READ times out and velocity reads back as 0. Returns
+  // true if every motor replied; `out` is in `ids` order (sign-magnitude decoded).
+  bool readPresentVelocityIndividually(
+    const std::vector<std::uint8_t> & ids, std::vector<std::int16_t> & out);
+
+  // Read one 2-byte register from a single motor (READ instruction 0x02). Returns
+  // false on timeout / checksum error. `value` is the raw little-endian word.
+  bool readWord(std::uint8_t motor_id, std::uint8_t address, std::uint16_t & value);
 
 private:
   // Flush, then send raw bytes.

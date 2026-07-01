@@ -4,9 +4,8 @@
      For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
 <robot
   name="Aloha">
-  <link name="base_link" />
   <link
-    name="cad_base_link">
+    name="base_link">
     <inertial>
       <origin
         xyz="-0.00084647910851246 0.00978916757496985 0.344753325406094"
@@ -45,11 +44,6 @@
       </geometry>
     </collision>
   </link>
-  <joint name="base_link_to_cad_base_link" type="fixed">
-    <origin xyz="0 0 0" rpy="0 0 -1.57079632679" />
-    <parent link="base_link" />
-    <child link="cad_base_link" />
-  </joint>
   <link
     name="wheel1">
     <inertial>
@@ -97,7 +91,7 @@
       xyz="-0.1538 0.091161 0.0422"
       rpy="0 0 -2.1099" />
     <parent
-      link="cad_base_link" />
+      link="base_link" />
     <child
       link="wheel1" />
     <axis
@@ -150,7 +144,7 @@
       xyz="0.15563 0.087993 0.0422"
       rpy="0 0 2.086" />
     <parent
-      link="cad_base_link" />
+      link="base_link" />
     <child
       link="wheel2" />
     <axis
@@ -203,7 +197,7 @@
       xyz="-0.0020354 -0.17875 0.0422"
       rpy="0 0 0" />
     <parent
-      link="cad_base_link" />
+      link="base_link" />
     <child
       link="wheel3" />
     <axis
@@ -256,7 +250,7 @@
       xyz="-0.001045 -0.067891 0.064"
       rpy="0 0 0" />
     <parent
-      link="cad_base_link" />
+      link="base_link" />
     <child
       link="vertical_link" />
     <axis
@@ -1070,21 +1064,18 @@
       velocity="0" />
   </joint>
   <!-- Navigation sensor frames added for micro-ROS lidar/IMU topics.
-       Conservative defaults before measured extrinsics:
-       - laser_frame: front centerline near the Nav2 footprint front edge (x ~= 0.22 m).
-       - imu_frame: base_link inertial origin, used here as the current center-of-mass estimate.
-       Measure and replace these xyz/rpy values on the real robot before final tuning.
+       TODO: replace origin xyz/rpy with measured sensor poses relative to base_link.
        The frame names must match /scan.header.frame_id and /imu.header.frame_id. -->
   <link name="laser_frame" />
   <joint name="base_link_to_laser_frame" type="fixed">
-    <origin xyz="0.20 0 0.12" rpy="0 0 0" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="laser_frame" />
   </joint>
 
   <link name="imu_frame" />
   <joint name="base_link_to_imu_frame" type="fixed">
-    <origin xyz="0.00978916757496985 0.00084647910851246 0.344753325406094" rpy="0 0 0" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="imu_frame" />
   </joint>
