@@ -33,8 +33,10 @@ alohamini_lidar_imu/
 - micro-ROS Agent UDP 端口：`8090`
 - ROS Domain ID：`5`
 - 原始雷达话题：`/scan`
-- 建图 / 导航雷达话题：`/scan_filtered`，由 `scan_sector_filter` 保留前方 `[-90°, +90°]` 扇形后发布
+- 建图 / 导航雷达话题：`/scan_filtered`，由 `scan_sector_filter` 发布；默认只保留前方 `[-90°, +90°]` 扇区
 - IMU 话题：`/imu`
+- bridge 原始里程计：`/wheel/odom`，由 EKF 融合后输出 `/odom` 和 `odom -> base_link` TF
+- 速度命令链路：Nav2/teleop 发布 `/cmd_vel`，`collision_monitor` 输出 `/cmd_vel_safe`，bridge 订阅 `/cmd_vel_safe`
 - 雷达 frame：`laser_frame`
 - IMU frame：`imu_frame`
 - AlohaMini ZMQ 命令端口：`5555`
@@ -59,13 +61,16 @@ export ROS_DOMAIN_ID=5
 
 ## 雷达和 IMU 安装 URDF 位置
 
-当前 URDF 中雷达和 IMU 位姿仍是临时占位：
+当前 URDF 中雷达和 IMU 位姿是未实测前的保守默认：
 
 ```text
 ros2_ws/src/alohamini_description/urdf/alohamini_nav.urdf
 ```
 
-后续量出真实安装位置后，修改这两个 fixed joint：
+- `laser_frame`：`xyz="0.20 0 0.12"`，放在 `base_link` 前方中线、接近 Nav2 footprint 前缘。
+- `imu_frame`：`xyz="-0.00084647910851246 0.00978916757496985 0.344753325406094"`，放在 `base_link` 的 inertial origin，作为当前质心估计。
+
+后续量出真实安装位置后，仍建议复核并修改这两个 fixed joint：
 
 ```xml
 <joint name="base_link_to_laser_frame" type="fixed">
@@ -76,3 +81,5 @@ ros2_ws/src/alohamini_description/urdf/alohamini_nav.urdf
   <origin xyz="X Y Z" rpy="ROLL PITCH YAW" />
 </joint>
 ```
+
+Nav2 当前按前向导航配置：局部规划器不采样横移和倒退，默认行为树不包含 BackUp recovery，bridge 也会拦截负 `linear.x` 与横向 `linear.y`；需要去后方目标时先原地转身再前进。`robot_localization` EKF 只融合 bridge 原始 odom twist 与 IMU yaw rate，`collision_monitor` 只做前向 slow/stop 急停保护。

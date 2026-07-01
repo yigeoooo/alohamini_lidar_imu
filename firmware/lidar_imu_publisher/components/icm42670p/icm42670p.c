@@ -1,10 +1,13 @@
 #include "icm42670p.h"
 
+#include <stdlib.h>
+
 #include "stdio.h"
 #include <inttypes.h>
 #include "math.h"
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_timer.h"
@@ -35,6 +38,22 @@ static float    icm_gyro_dps[3];
 static uint16_t icm_accel_fsr_g = 0;
 static uint16_t icm_gyro_fsr_dps = 0;
 static int      icm_start_ok = 0;
+static SemaphoreHandle_t icm_data_mutex;
+
+static void icm_data_mutex_init(void)
+{
+    if (icm_data_mutex != NULL)
+    {
+        return;
+    }
+
+    icm_data_mutex = xSemaphoreCreateMutex();
+    if (icm_data_mutex == NULL)
+    {
+        ESP_LOGE(TAG, "Failed to create ICM data mutex");
+        abort();
+    }
+}
 
 struct inv_imu_serif icm_serif;
 static struct inv_imu_device icm_driver;
@@ -170,7 +189,7 @@ static void get_accel_and_gyr_fsr(uint16_t *accel_fsr_g, uint16_t *gyro_fsr_dps)
 		*accel_fsr_g = 16;
 		break;
 	default:
-		*accel_fsr_g = -1;
+		*accel_fsr_g = 0;
 		break;
 	}
 
@@ -189,7 +208,7 @@ static void get_accel_and_gyr_fsr(uint16_t *accel_fsr_g, uint16_t *gyro_fsr_dps)
 		*gyro_fsr_dps = 2000;
 		break;
 	default:
-		*gyro_fsr_dps = -1;
+		*gyro_fsr_dps = 0;
 		break;
 	}
 }
@@ -199,25 +218,48 @@ static void get_accel_and_gyr_fsr(uint16_t *accel_fsr_g, uint16_t *gyro_fsr_dps)
 // in which the original IMU data is extracted and the units are converted according to the range.
 static void imu_callback(inv_imu_sensor_event_t *event)
 {
-    icm_accel[0] = event->accel[0];
-    icm_accel[1] = event->accel[1];
-    icm_accel[2] = event->accel[2];
+    int16_t accel[3] = {
+        event->accel[0],
+        event->accel[1],
+        event->accel[2],
+    };
+    int16_t gyro[3] = {
+        event->gyro[0],
+        event->gyro[1],
+        event->gyro[2],
+    };
 
-    icm_gyro[0] = event->gyro[0];
-    icm_gyro[1] = event->gyro[1];
-    icm_gyro[2] = event->gyro[2];
-	
-	/*
-	 * Convert raw data into scaled data in (m/s^2) and (rad/s)
-     * ±2g:accel*2*9.8/32767=accel/1671.84(m/s^2)
-     * ±500dps:gyro*500*PI/180/32767=gyro/3754.9(rad/s)
-	*/
-	icm_accel_g[0]  = (float)(icm_accel[0] * icm_accel_fsr_g * 9.8) / (float)INT16_MAX;
-	icm_accel_g[1]  = (float)(icm_accel[1] * icm_accel_fsr_g * 9.8) / (float)INT16_MAX;
-	icm_accel_g[2]  = (float)(icm_accel[2] * icm_accel_fsr_g * 9.8) / (float)INT16_MAX;
-	icm_gyro_dps[0] = (float)(icm_gyro[0] * icm_gyro_fsr_dps * M_PI) / 180 / (float)INT16_MAX;
-	icm_gyro_dps[1] = (float)(icm_gyro[1] * icm_gyro_fsr_dps * M_PI) / 180 / (float)INT16_MAX;
-	icm_gyro_dps[2] = (float)(icm_gyro[2] * icm_gyro_fsr_dps * M_PI) / 180 / (float)INT16_MAX;
+    /*
+     * Convert raw data into scaled data in (g) and (deg/s).
+     * ±2g:accel*2/32767(g)
+     * ±500dps:gyro*500/32767(deg/s)
+     */
+    float accel_g[3] = {
+        (float)(accel[0] * icm_accel_fsr_g) / (float)INT16_MAX,
+        (float)(accel[1] * icm_accel_fsr_g) / (float)INT16_MAX,
+        (float)(accel[2] * icm_accel_fsr_g) / (float)INT16_MAX,
+    };
+    float gyro_dps[3] = {
+        (float)(gyro[0] * icm_gyro_fsr_dps) / (float)INT16_MAX,
+        (float)(gyro[1] * icm_gyro_fsr_dps) / (float)INT16_MAX,
+        (float)(gyro[2] * icm_gyro_fsr_dps) / (float)INT16_MAX,
+    };
+
+    if (icm_data_mutex != NULL)
+    {
+        xSemaphoreTake(icm_data_mutex, portMAX_DELAY);
+    }
+    for (int i = 0; i < 3; i++)
+    {
+        icm_accel[i] = accel[i];
+        icm_gyro[i] = gyro[i];
+        icm_accel_g[i] = accel_g[i];
+        icm_gyro_dps[i] = gyro_dps[i];
+    }
+    if (icm_data_mutex != NULL)
+    {
+        xSemaphoreGive(icm_data_mutex);
+    }
 }
 
 
@@ -386,36 +428,72 @@ static void Icm42670p_Task(void *arg)
 // Get the raw accelerometer data
 void Icm42670p_Get_Accel_RawData(int16_t accel[3])
 {
+    if (icm_data_mutex != NULL)
+    {
+        xSemaphoreTake(icm_data_mutex, portMAX_DELAY);
+    }
     accel[0] = icm_accel[0];
     accel[1] = icm_accel[1];
     accel[2] = icm_accel[2];
+    if (icm_data_mutex != NULL)
+    {
+        xSemaphoreGive(icm_data_mutex);
+    }
 }
 
 // 获取陀螺仪的原始数据
 // Get the raw data of the gyroscope
 void Icm42670p_Get_Gyro_RawData(int16_t gyro[3])
 {
+    if (icm_data_mutex != NULL)
+    {
+        xSemaphoreTake(icm_data_mutex, portMAX_DELAY);
+    }
     gyro[0] = icm_gyro[0];
     gyro[1] = icm_gyro[1];
     gyro[2] = icm_gyro[2];
+    if (icm_data_mutex != NULL)
+    {
+        xSemaphoreGive(icm_data_mutex);
+    }
+}
+
+// 获取缩放后的加速度计和陀螺仪数据
+// Get the scaled accelerometer and gyroscope data
+void Icm42670p_Get_Accel_Gyro(float accel_g[3], float gyro_dps[3])
+{
+    if (icm_data_mutex != NULL)
+    {
+        xSemaphoreTake(icm_data_mutex, portMAX_DELAY);
+    }
+    accel_g[0] = icm_accel_g[0];
+    accel_g[1] = icm_accel_g[1];
+    accel_g[2] = icm_accel_g[2];
+    gyro_dps[0] = icm_gyro_dps[0];
+    gyro_dps[1] = icm_gyro_dps[1];
+    gyro_dps[2] = icm_gyro_dps[2];
+    if (icm_data_mutex != NULL)
+    {
+        xSemaphoreGive(icm_data_mutex);
+    }
 }
 
 // 获取加速度计缩放后的数据
 // Get the accelerometer scaled data
 void Icm42670p_Get_Accel_g(float accel_g[3])
 {
-    accel_g[0] = icm_accel_g[0];
-    accel_g[1] = icm_accel_g[1];
-    accel_g[2] = icm_accel_g[2];
+    float gyro_dps[3] = {0};
+
+    Icm42670p_Get_Accel_Gyro(accel_g, gyro_dps);
 }
 
 // 获取陀螺仪的缩放后的数据
 // Get the zoom data of the gyroscope
 void Icm42670p_Get_Gyro_dps(float gyro_dps[3])
 {
-    gyro_dps[0] = icm_gyro_dps[0];
-    gyro_dps[1] = icm_gyro_dps[1];
-    gyro_dps[2] = icm_gyro_dps[2];
+    float accel_g[3] = {0};
+
+    Icm42670p_Get_Accel_Gyro(accel_g, gyro_dps);
 }
 
 // IMU初始化成功返回1，失败返回-1，正在初始化返回0
@@ -436,6 +514,7 @@ void Icm42670p_Get_Accel_Gyro_FSR(uint16_t *accel_fsr_g, uint16_t *gyro_fsr_dps)
 // 初始化ICM42670P Initialize ICM42670P
 void Icm42670p_Init(void)
 {
+    icm_data_mutex_init();
     // 初始化I2C接口 Initialize the I2C interface
     I2C_Master_Init();
     // 开启IMU任务 Start an IMU task

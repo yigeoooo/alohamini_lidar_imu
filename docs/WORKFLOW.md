@@ -83,6 +83,8 @@ export ROS_DOMAIN_ID=5
 ros2 launch alohamini_bringup sensors_bridge.launch.py host:=127.0.0.1
 ```
 
+默认 `/scan_filtered` 只保留 `/scan` 的前方 `[-90°, +90°]` 扇区，避开前置雷达被机身遮挡的后方数据；只有现场确认雷达无遮挡时，才覆盖 `scan_min_angle` / `scan_max_angle` 扩大扇区。`sensors_bridge.launch.py` 还会启动 EKF 和前向 collision monitor：bridge 发布 `/wheel/odom`，EKF 融合 `/wheel/odom` twist 与 `/imu` yaw rate 后发布 `/odom` 和 `odom -> base_link` TF；原始 `/cmd_vel` 先进入 collision monitor，过滤后通过 `/cmd_vel_safe` 给 bridge。
+
 如果 ZMQ loopback 不通，用树莓派 IP：
 
 ```bash
@@ -127,9 +129,10 @@ ros2 run alohamini_bringup alohamini_mapping_session \
 按键含义：
 
 ```text
-w / s       前进 / 后退
-z / x       左移 / 右移
+w           前进
 a / d       原地左转 / 原地右转
+s           后退（默认被 bridge 拦截，需 `--allow-reverse`）
+z / x       左移 / 右移（默认被 bridge 拦截，需 `--allow-lateral-motion`）
 r / f       加速 / 减速
 Space 或 0  发送一次零速 /cmd_vel
 Shift+S     保存当前地图，建图继续运行
@@ -228,7 +231,9 @@ ros2 launch alohamini_bringup navigation.launch.py \
   map:=/root/ws/maps/alohamini_map.yaml
 ```
 
-导航阶段由 AMCL 发布 `map -> odom`，Nav2 发布 `/cmd_vel`，bridge 转成 ZMQ 速度给 LeRobot host。
+导航阶段由 AMCL 发布 `map -> odom`，EKF 发布 `odom -> base_link`，Nav2 发布 `/cmd_vel`，`collision_monitor` 过滤成 `/cmd_vel_safe` 后由 bridge 转成 ZMQ 速度给 LeRobot host。
+
+当前 Nav2 参数按前向导航配置，局部规划器和速度平滑器只允许前进和原地旋转；默认行为树不包含 BackUp recovery，bridge 也会拦截倒退和横移命令。需要去后方目标时让机器人先转身，再向前行驶；初次导航应先用低速短距离目标观察 local costmap、LaserScan、EKF `/odom` 和 collision monitor 的 `/cmd_vel_safe`。
 
 ### 8.1 怎么确认起点和终点
 
@@ -389,7 +394,8 @@ ros2 topic echo /odom --once
 Fixed Frame: map
 TF: map -> odom -> base_link -> laser_frame / imu_frame
 LaserScan: /scan_filtered
-Odometry: /odom
+Odometry: /wheel/odom raw bridge odom, /odom EKF filtered odom
+Velocity: /cmd_vel raw Nav2/teleop command, /cmd_vel_safe collision-monitor-filtered command
 Map: /map
 Global Plan: /plan
 Global/Local Costmap: /global_costmap/costmap, /local_costmap/costmap

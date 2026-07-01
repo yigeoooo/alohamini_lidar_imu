@@ -56,6 +56,22 @@ uint8_t rx_protocol_buf[MS200_BUF_MAX] = {0};
 ms200_package_t ms200_pkg = {0};
 ms200_data_t ms200_data = {0};
 
+static void copy_report_string(char *dest, size_t dest_size, const uint8_t *src, uint8_t len)
+{
+    if (dest_size == 0)
+    {
+        return;
+    }
+
+    size_t copy_len = len;
+    if (copy_len >= dest_size)
+    {
+        copy_len = dest_size - 1;
+    }
+    memcpy(dest, src, copy_len);
+    dest[copy_len] = '\0';
+}
+
 
 
 // 返回计算CRC8的值
@@ -75,8 +91,12 @@ static uint8_t Ms200_Calculate_CRC8(uint8_t* protocol_buf, uint8_t crc_len)
 // 解析雷达系统报文, 输入协议缓存buf，输出雷达SN码信息或者版本信息，ASCII字符数组。
 static void Ms200_Parse_Report(uint8_t* protocol_buf)
 {
-    int i;
     uint8_t data_len = protocol_buf[3];
+    if (data_len > MS200_BUF_MAX - 7)
+    {
+        YB_DEBUG(TAG, "Invalid report length:%u", (unsigned int)data_len);
+        return;
+    }
     uint8_t crc8 = protocol_buf[data_len+4];
     if(protocol_buf[data_len+5] != MS200_TAIL_1 || protocol_buf[data_len+6] != MS200_TAIL_2) return;
     if (crc8 != Ms200_Calculate_CRC8(protocol_buf, data_len+4))
@@ -84,24 +104,21 @@ static void Ms200_Parse_Report(uint8_t* protocol_buf)
         YB_DEBUG(TAG, "CRC8 Check Error");
         return;
     }
-    
-    // 判断SN码标志位，并保存SN码信息
-    // Determine the SN flag bit and save the SN information
+
     if(protocol_buf[2] == MS200_FLAG_SN)
     {
-        for (i = 0; i < data_len; i++)
-        {
-            ms200_sn[i] = protocol_buf[4 + i];
-        }
+        copy_report_string(ms200_sn, sizeof(ms200_sn), &protocol_buf[4], data_len);
         ESP_LOGI(TAG, "SN:%s", ms200_sn);
     }
-    // 判断版本标志位，并保存版本信息
-    // Determine the version flag bit and save the version information
     else if (protocol_buf[2] == MS200_FLAG_VERSION)
     {
-        for (i = 1; i < data_len; i++)
+        if (data_len > 1)
         {
-            ms200_version[i-1] = protocol_buf[4 + i];
+            copy_report_string(ms200_version, sizeof(ms200_version), &protocol_buf[5], data_len - 1);
+        }
+        else
+        {
+            ms200_version[0] = '\0';
         }
         ESP_LOGI(TAG, "%s", ms200_version);
     }
@@ -111,7 +128,14 @@ static void Ms200_Parse_Report(uint8_t* protocol_buf)
 // Analyze Lidar points data packets
 static int Ms200_Parse_Package(uint8_t* protocol_buf, ms200_package_t* out_pkg)
 {
-    uint8_t buf_len = (protocol_buf[1] & 0x1F) * 3 + 11;
+    uint8_t count = protocol_buf[1] & 0x1F;
+    if (count < 2 || count > MS200_POINT_PER_PACK)
+    {
+        YB_DEBUG(TAG, "Invalid point count:%u", (unsigned int)count);
+        return ESP_FAIL;
+    }
+
+    uint8_t buf_len = count * 3 + 11;
     uint8_t check_num = protocol_buf[buf_len-1];
     uint8_t crc8 = Ms200_Calculate_CRC8(protocol_buf, buf_len-1);
     if (crc8 != check_num)
@@ -121,14 +145,15 @@ static int Ms200_Parse_Package(uint8_t* protocol_buf, ms200_package_t* out_pkg)
     }
 
     out_pkg->header = protocol_buf[0];
-    out_pkg->count = protocol_buf[1] & 0x1F;
+    out_pkg->count = count;
     out_pkg->speed = (protocol_buf[3] << 8) | protocol_buf[2];
     out_pkg->start_angle = (protocol_buf[5] << 8) | protocol_buf[4];
     out_pkg->end_angle = (protocol_buf[buf_len-4] << 8) | protocol_buf[buf_len-5];
     out_pkg->time_stamp = (protocol_buf[buf_len-2] << 8) | protocol_buf[buf_len-3];
     out_pkg->crc8 = protocol_buf[buf_len-1];
 
-    for (int i = 0; i < MS200_POINT_PER_PACK; i++)
+    memset(out_pkg->points, 0, sizeof(out_pkg->points));
+    for (int i = 0; i < out_pkg->count; i++)
     {
         out_pkg->points[i].distance = (protocol_buf[3*i+7] << 8) | protocol_buf[3*i+6];
         out_pkg->points[i].intensity = protocol_buf[3*i+8];
@@ -142,6 +167,12 @@ static void Ms200_Update_Data(ms200_package_t* pkg, ms200_data_t* out_data)
 {
     uint16_t step_angle = 0;
     uint16_t angle = 0;
+    if (pkg->count < 2 || pkg->count > MS200_POINT_PER_PACK)
+    {
+        YB_DEBUG(TAG, "Skip invalid point count:%u", (unsigned int)pkg->count);
+        return;
+    }
+
     if (pkg->end_angle > pkg->start_angle)
     {
         // 正常情况 normal codition
@@ -210,6 +241,14 @@ void Ms200_Data_Receive(uint8_t rx_data)
     }
     case 3: // 数据长度 data length
     {
+        if (rx_data > MS200_BUF_MAX - 7)
+        {
+            rx_flag = 0;
+            rx_buf_len = 0;
+            rx_buf_index = 0;
+            memset(rx_protocol_buf, 0, sizeof(rx_protocol_buf));
+            break;
+        }
         rx_protocol_buf[3] = rx_data;
         rx_flag = 4;
         rx_buf_len = rx_data+3;
@@ -247,9 +286,18 @@ void Ms200_Data_Receive(uint8_t rx_data)
     case 5: // 点云数据点数N Point data N
     {
         rx_protocol_buf[1] = rx_data;
+        uint8_t count = rx_protocol_buf[1] & 0x1F;
+        if (count < 2 || count > MS200_POINT_PER_PACK)
+        {
+            rx_flag = 0;
+            rx_buf_len = 0;
+            rx_buf_index = 0;
+            memset(rx_protocol_buf, 0, sizeof(rx_protocol_buf));
+            break;
+        }
         rx_flag = 6;
         rx_buf_index = 2;
-        rx_buf_len = (rx_protocol_buf[1]&0x1F)*3+11;
+        rx_buf_len = count*3+11;
         break;
     }
     // 转速，起始角度，点云信息，结束角度，时间戳，校验位

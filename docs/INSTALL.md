@@ -38,6 +38,12 @@ sudo usermod -aG docker "$USER"
 newgrp docker
 ```
 
+如果网络问题无法安装，可以采取以下方式安装
+
+```bash
+bash <(curl -fsSL https://xuanyuan.cloud/docker.sh)
+```
+
 验证 Docker 可用：
 
 ```bash
@@ -58,21 +64,24 @@ docker pull --platform linux/arm64/v8 docker.io/library/ros:humble-ros-base-jamm
 
 ```text
 docker.io/microros/micro-ros-agent:humble  接收 ESP32 / micro-ROS 发布的 /scan 和 /imu
-docker.io/library/ros:humble-ros-base-jammy  手工安装 Nav2、SLAM Toolbox、bridge 和 RViz 依赖的基础容器
+docker.io/library/ros:humble-ros-base-jammy  手工安装 Nav2、SLAM Toolbox 和 bridge 运行依赖的基础容器
 ```
 
 如果树莓派访问 Docker Hub 慢，可以在网络更好的电脑上拉 arm64 镜像并导出：
 
 ```bash
+docker pull --platform linux/arm64/v8 docker.io/microros/micro-ros-agent:humble
 docker pull --platform linux/arm64/v8 docker.io/library/ros:humble-ros-base-jammy
-docker save docker.io/library/ros:humble-ros-base-jammy | gzip > ros-humble-ros-base-jammy-arm64.tar.gz
-scp ros-humble-ros-base-jammy-arm64.tar.gz pi5@pi5_ip:~/
+docker save -o micro_ros_humble_arm64.tar docker.io/microros/micro-ros-agent:humble
+docker save -o ros_humble_base_jammy_arm64.tar docker.io/library/ros:humble-ros-base-jammy
+scp micro_ros_humble_arm64.tar ros_humble_base_jammy_arm64.tar pi5@pi5_ip:~/
 ```
 
 树莓派上导入：
 
 ```bash
-gunzip -c ~/ros-humble-ros-base-jammy-arm64.tar.gz | docker load
+sudo docker load -i micro_ros_humble_arm64.tar
+sudo docker load -i ros_humble_base_jammy_arm64.tar
 ```
 
 ## 4. 创建 micro-ROS Agent 容器
@@ -136,6 +145,8 @@ apt update
 apt install -y --no-install-recommends \
   ros-humble-navigation2 \
   ros-humble-nav2-bringup \
+  ros-humble-nav2-collision-monitor \
+  ros-humble-nav2-lifecycle-manager \
   ros-humble-slam-toolbox \
   ros-humble-robot-localization \
   ros-humble-tf2-ros \

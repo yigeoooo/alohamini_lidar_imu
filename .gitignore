@@ -1,4 +1,7 @@
 # ROS 2 / colcon generated files
+/build/
+/install/
+/log/
 ros2_ws/build/
 ros2_ws/install/
 ros2_ws/log/
@@ -17,3 +20,6 @@ ros2_ws/maps/
 # caches
 firmware/lidar_imu_publisher/sdkconfig
 firmware/lidar_imu_publisher/sdkconfig.old
+
+extra_components/
+

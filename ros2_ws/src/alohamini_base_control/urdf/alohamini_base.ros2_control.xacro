@@ -19,9 +19,25 @@
   <xacro:arg name="serial_port" default="/dev/am_arm_follower_left"/>
   <xacro:arg name="baud_rate" default="1000000"/>
   <xacro:arg name="use_mock_hardware" default="false"/>
+  <!-- Rotation of base_footprint (REP-103: x=forward, y=left) onto the SolidWorks
+       base_link, whose axes are ~90 deg off. Keeps the Odometry arrow aligned with
+       the robot mesh AND with the physical forward direction, so cmd_vel linear.x>0
+       drives the mesh forward (+x) in RViz. -90 verified on this build (base_yaw_deg
+       90 aligned arrow+mesh but pointed them at -x, i.e. driving looked reversed;
+       -90 points them at +x). If it still looks off, try 90 / 180 / 0. -->
+  <xacro:arg name="base_yaw_deg" default="90.0"/>
 
   <!-- Reuse the existing robot description (meshes, links, joints). -->
   <xacro:include filename="$(find alohamini_description)/urdf/alohamini_nav.urdf"/>
+
+  <!-- REP-103 root frame. The controller publishes odom -> base_footprint; this
+       static joint rotates it onto base_link so mesh + odometry agree. -->
+  <link name="base_footprint"/>
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0" rpy="0 0 ${radians($(arg base_yaw_deg))}"/>
+  </joint>
 
   <ros2_control name="AlohaMiniBase" type="system">
     <hardware>
