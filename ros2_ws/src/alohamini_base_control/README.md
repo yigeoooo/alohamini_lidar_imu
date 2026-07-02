@@ -263,17 +263,30 @@ launch 还会设 `GAZEBO_MODEL_DATABASE_URI=""`，避免 gzserver 启动时卡�
 `package://alohamini_description/...` 网格路径（spawn 时会变成 `model://...`）能解析到
 本地 `.STL` 文件，而不是报 `Failed to find mesh file`。
 
-## 行为说明 / 注意点
+## 坐标系与方向约定（实机已验证）
 
-- **里程计 x/y 符号已按 REP-103 还原**：正向控制仍复刻 `lekiwi.py` 的
-  `velocity_vector = [-x, -y, theta]`，保证轮子命令与原 AlohaMini 遥操一致；反向从
-  轮速反馈恢复 body 速度时会对 x/y 再取负，和 LeRobot `_wheel_raw_to_body()` 一致，
-  因此 `/odom` 平移方向与 `/cmd_vel` 和实车运动方向一致。
-- **每轮转向符号需在实机确认**：电机 ID 和运动学角都是 `config/controllers.yaml` 与
-  xacro 里的参数，改动无需重新编译。
+底盘的 `base_link`（SolidWorks 导出）不符合 REP-103——它的坐标轴相对「x=前进、
+y=左」转了约 90°，且 lekiwi 运动学里有 x/y 取负的历史约定。本驱动通过**三处解耦的
+处理**把方向理顺，让实机、模型、里程计三者一致：
+
+| 部件 | 处理 | 效果 |
+|------|------|------|
+| 实机运动 | 命令侧**不做任何旋转** | `/cmd_vel` `linear.x>0` → 底盘物理前进（与 lerobot WASD 遥操一致） |
+| 模型朝向 | xacro 里 `base_footprint→base_link` 静态转 `base_yaw_deg`（默认 90°） | RViz 里车头朝 odom 的 +x |
+| 里程计 | `omni_base_controller` 里把恢复出的 `vel.x/vel.y` 取负（抵消 lekiwi 正解取负、逆解不取负的 180° 翻转） | `/odom` 的前进方向、箭头朝向与车头、物理运动全部一致 |
+
+里程计发布在 **`odom → base_footprint`**（REP-103，x=前进、y=左），再经静态关节到
+`base_link`。整条 TF 链自洽，Nav2/SLAM 直接可用。
+
+- **若 RViz 里方向仍不对**：只调 `base_yaw_deg`（launch 参数，免编译，试 `90/-90/180/0`）
+  修车头朝向；`vel.x/y` 取负修的是「前进/后退」翻转。命令侧始终不动，怎么调都**不会**
+  把实机方向带偏。
+- **每轮转向符号**：电机 ID 和运动学角都是 `config/controllers.yaml` 与 xacro 里的参数，
+  改动无需重新编译。
 - 在 `u_2204`（Humble）验证：两个控制器都到 `active`，三个 `wheelN/velocity` 命令接口
   都被 claim，`/odom`、`/tf`、`/joint_states` 正常发布，轮速与 Python 参考实现一致
-  （`x=0.1, wz=0.2` 时 `[左, 后, 右] = [2.232, 0.5, -1.232]` rad/s）。
+  （`x=0.1, wz=0.2` 时 `[左, 后, 右] = [2.232, 0.5, -1.232]` rad/s）。实机验证：`x+` 前进、
+  车头/箭头/移动方向在 RViz 中一致。
 
 ## 常见问题排查
 
@@ -285,6 +298,14 @@ launch 还会设 `GAZEBO_MODEL_DATABASE_URI=""`，避免 gzserver 启动时卡�
   本驱动在 `on_activate` 里已按「关扭矩→解锁→写 Operating_Mode=速度→重新开扭矩」的正确
   顺序切换模式（Feetech 的 Operating_Mode 在 EEPROM 区，扭矩开着时改不动）。若仍不转，
   确认这条总线上舵机 ID 确为 8/9/10、动力电源已接。
+- **轮子会动，但 `/odom` 一直不变（twist 恒为 0）**：底盘在转、里程计却不更新，说明
+  `read()` 读不回轮子的 Present_Velocity。原因通常是舵机固件**不支持 SYNC READ(0x82)**
+  ——写命令是广播、不需要应答，所以轮子照转，但批量读会超时、速度恒读回 0。本驱动**默认
+  用逐个 READ(0x02) 读速度**（`read()` 里 `use_sync_read=false`），对 Feetech 最兼容。
+  若你的舵机确认支持 SYNC READ、想用更快的批量读，在 `<ros2_control>` 硬件参数里加
+  `<param name="use_sync_read">true</param>`。排查时先看 `/wheel_joint_states`（或
+  `/joint_states`）里轮子的 `velocity` 字段：持续发速度时若非零 → 读取正常；恒为 0 →
+  读取失败。
 - **`ros2_control_node` 段错误，堆栈在 `libfastrtps.so`**：这是 Fast-DDS 在树莓派
   (ARM64) 上的偶发崩溃，**与本包代码无关**。建议换 CycloneDDS：
   `sudo apt install ros-humble-rmw-cyclonedds-cpp`，然后

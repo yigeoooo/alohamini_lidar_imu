@@ -25,6 +25,7 @@ def generate_launch_description():
     serial_port = LaunchConfiguration("serial_port")
     baud_rate = LaunchConfiguration("baud_rate")
     use_mock_hardware = LaunchConfiguration("use_mock_hardware")
+    base_yaw_deg = LaunchConfiguration("base_yaw_deg")
     slam_params_file = LaunchConfiguration("slam_params_file")
 
     sensors_launch = PathJoinSubstitution(
@@ -46,6 +47,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("baud_rate", default_value="1000000"),
             DeclareLaunchArgument("use_mock_hardware", default_value="false"),
+            DeclareLaunchArgument("base_yaw_deg", default_value="-135.0"),
             DeclareLaunchArgument("slam_params_file", default_value=default_slam_params),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(sensors_launch),
@@ -53,6 +55,7 @@ def generate_launch_description():
                     "serial_port": serial_port,
                     "baud_rate": baud_rate,
                     "use_mock_hardware": use_mock_hardware,
+                    "base_yaw_deg": base_yaw_deg,
                 }.items(),
             ),
             IncludeLaunchDescription(

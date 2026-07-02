@@ -75,6 +75,7 @@ def build_mapping_command(args: argparse.Namespace) -> list[str]:
             f"serial_port:={args.serial_port}",
             f"baud_rate:={args.baud_rate}",
             f"use_mock_hardware:={str_bool(args.use_mock_hardware)}",
+            f"base_yaw_deg:={args.base_yaw_deg}",
         ]
         if args.slam_params_file:
             cmd.append(f"slam_params_file:={args.slam_params_file}")
@@ -223,6 +224,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--serial-port", default="/dev/ttyACM0", help="ros2_control base serial port")
     parser.add_argument("--baud-rate", default="1000000", help="ros2_control serial baud rate")
+    parser.add_argument("--base-yaw-deg", default="-135.0", help="ros2_control base_footprint->base_link static yaw in degrees")
     parser.add_argument(
         "--use-mock-hardware",
         action="store_true",

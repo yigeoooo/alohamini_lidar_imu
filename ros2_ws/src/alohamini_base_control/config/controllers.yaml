@@ -37,10 +37,14 @@ omni_base_controller:
     max_wheel_raw: 3000
 
     # Topics / frames (kept identical to the old ZMQ bridge for drop-in use).
+    # odom is published as odom -> base_footprint (REP-103, x=forward, y=left). A
+    # static joint in the ros2_control xacro rotates base_footprint +90 deg onto the
+    # SolidWorks base_link, so the Odometry arrow and the robot mesh line up and the
+    # whole TF chain is REP-103 consistent.
     cmd_vel_topic: /cmd_vel
     odom_topic: /odom
     odom_frame: odom
-    base_frame: base_link
+    base_frame: base_footprint
     publish_tf: true
     use_stamped_vel: false
 

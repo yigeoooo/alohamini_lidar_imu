@@ -7,6 +7,7 @@ Panels:
         - /Global Options1
         - /TF1
         - /LaserScan1
+        - /Scan Sector1
         - /Map1
         - /Odometry1
       Splitter Ratio: 0.5
@@ -106,12 +107,25 @@ Visualization Manager:
       Size (m): 0.03
       Style: Points
       Topic:
-        Depth: 5
+        Depth: 20
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
         Value: /scan_filtered
       Use Fixed Frame: true
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Marker Topic:
+        Depth: 20
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /scan_sector_marker
+      Name: Scan Sector
+      Namespaces:
+        scan_sector_filter: true
+      Queue Size: 100
       Value: true
     - Angle Tolerance: 0.1
       Class: rviz_default_plugins/Odometry

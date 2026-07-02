@@ -49,6 +49,7 @@ hardware_interface::CallbackReturn AlohaMiniBaseHardware::on_init(
   baud_rate_ = std::stoi(get_param("baud_rate", "1000000"));
   max_wheel_raw_ = std::stoi(get_param("max_wheel_raw", "3000"));
   configure_motors_ = get_param("configure_motors", "true") == "true";
+  use_sync_read_ = get_param("use_sync_read", "false") == "true";
 
   const std::size_t n = info_.joints.size();
   motor_ids_.assign(n, 0);
@@ -214,9 +215,12 @@ hardware_interface::return_type AlohaMiniBaseHardware::read(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & period)
 {
   std::vector<std::int16_t> raw;
-  if (!bus_.syncReadPresentVelocity(motor_ids_, raw)) {
+  const bool ok = use_sync_read_
+    ? bus_.syncReadPresentVelocity(motor_ids_, raw)
+    : bus_.readPresentVelocityIndividually(motor_ids_, raw);
+  if (!ok) {
     // Keep last good values rather than spiking; surface the issue but stay alive.
-    RCLCPP_DEBUG(logger(), "sync read failed: %s", bus_.lastError().c_str());
+    RCLCPP_DEBUG(logger(), "velocity read failed: %s", bus_.lastError().c_str());
     return hardware_interface::return_type::OK;
   }
 

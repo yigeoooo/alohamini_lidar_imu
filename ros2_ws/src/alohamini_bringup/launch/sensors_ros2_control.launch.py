@@ -14,9 +14,9 @@
 # (alohamini_base_control) instead of the ZMQ bridge (alohamini_nav_bridge).
 #
 # Provides the same downstream interface as sensors_bridge.launch.py:
-#   - robot_description + full /joint_states -> TF tree (odom->base_link->sensors)
+#   - robot_description + full /joint_states -> TF tree (odom->base_footprint->base_link->sensors)
 #   - /scan_filtered (sector-limited laser)
-#   - /cmd_vel subscriber + /odom (+ odom->base_link TF) via OmniBaseController
+#   - /cmd_vel subscriber + /odom (+ odom->base_footprint TF) via OmniBaseController
 #
 # Joint-state handling: base_control's joint_state_broadcaster publishes only the
 # three wheel joints (remapped here to /wheel_joint_states). A joint_state_publisher
@@ -39,8 +39,11 @@ def generate_launch_description():
     serial_port = LaunchConfiguration("serial_port")
     baud_rate = LaunchConfiguration("baud_rate")
     use_mock_hardware = LaunchConfiguration("use_mock_hardware")
+    base_yaw_deg = LaunchConfiguration("base_yaw_deg")
     scan_input_topic = LaunchConfiguration("scan_input_topic")
     scan_topic = LaunchConfiguration("scan_topic")
+    scan_marker_topic = LaunchConfiguration("scan_marker_topic")
+    scan_marker_range = LaunchConfiguration("scan_marker_range")
     scan_min_angle = LaunchConfiguration("scan_min_angle")
     scan_max_angle = LaunchConfiguration("scan_max_angle")
 
@@ -69,8 +72,15 @@ def generate_launch_description():
                 default_value="false",
                 description="Use ros2_control mock_components instead of the real serial driver.",
             ),
+            DeclareLaunchArgument(
+                "base_yaw_deg",
+                default_value="-135.0",
+                description="Static yaw (deg) of base_footprint->base_link; tune if RViz forward/left look wrong.",
+            ),
             DeclareLaunchArgument("scan_input_topic", default_value="/scan"),
             DeclareLaunchArgument("scan_topic", default_value="/scan_filtered"),
+            DeclareLaunchArgument("scan_marker_topic", default_value="/scan_sector_marker"),
+            DeclareLaunchArgument("scan_marker_range", default_value="1.0"),
             DeclareLaunchArgument("scan_min_angle", default_value="-1.57079632679"),
             DeclareLaunchArgument("scan_max_angle", default_value="1.57079632679"),
             # Base: robot_state_publisher + controller_manager + wheel controllers.
@@ -82,6 +92,7 @@ def generate_launch_description():
                     "serial_port": serial_port,
                     "baud_rate": baud_rate,
                     "use_mock_hardware": use_mock_hardware,
+                    "base_yaw_deg": base_yaw_deg,
                     "joint_states_topic": "/wheel_joint_states",
                 }.items(),
             ),
@@ -113,6 +124,8 @@ def generate_launch_description():
                         "output_topic": scan_topic,
                         "min_angle": scan_min_angle,
                         "max_angle": scan_max_angle,
+                        "marker_topic": scan_marker_topic,
+                        "marker_range": scan_marker_range,
                     }
                 ],
             ),

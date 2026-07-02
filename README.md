@@ -36,7 +36,7 @@ alohamini_lidar_imu/
 - 原始雷达话题：`/scan`
 - 建图 / 导航雷达话题：`/scan_filtered`，由 `scan_sector_filter` 发布；默认只保留前方 `[-90°, +90°]` 扇区
 - IMU 话题：`/imu`
-- 推荐底盘驱动：`alohamini_base_control` ros2_control，直接发布 `/odom` 和 `odom -> base_link` TF
+- 推荐底盘驱动：`alohamini_base_control` ros2_control，直接发布 `/odom` 和 `odom -> base_footprint` TF
 - 推荐速度命令链路：Nav2/teleop 发布 `/cmd_vel`，`OmniBaseController` 直接驱动 Feetech 底盘轮
 - 旧 ZMQ bridge 备用链路：bridge 发布 `/wheel/odom`，由 EKF 融合后输出 `/odom` 和 TF；bridge 订阅 `/cmd_vel_safe`
 - 雷达 frame：`laser_frame`
@@ -69,14 +69,14 @@ export ROS_DOMAIN_ID=5
 ros2_ws/src/alohamini_description/urdf/alohamini_nav.urdf
 ```
 
-- `laser_frame`：`xyz="0.20 0 0.12"`，放在 `base_link` 前方中线、接近 Nav2 footprint 前缘。
-- `imu_frame`：`xyz="-0.00084647910851246 0.00978916757496985 0.344753325406094"`，放在 `base_link` 的 inertial origin，作为当前质心估计。
+- `laser_frame`：URDF 里写在 CAD `base_link` 坐标下：`xyz="0 -0.20 0.12"`、`rpy="0 0 -0.78539816339"`；经 `base_footprint→base_link` -135° 静态变换后，等效到机器人视觉前方中线，`base_footprint` 约 `xyz="-0.14 0.14 0.12"`，且 LaserScan 0° 相对初始值向左旋转 45°，朝视觉正前方。
+- `imu_frame`：URDF 里写在 CAD `base_link` 坐标下：`xyz="0.00978916757496985 0.00084647910851246 0.344753325406094"`，等效为 `base_footprint` 下的 base inertial origin，作为当前质心估计。
 
 后续量出真实安装位置后，仍建议复核并修改这两个 fixed joint：
 
 ```xml
 <joint name="base_link_to_laser_frame" type="fixed">
-  <origin xyz="X Y Z" rpy="ROLL PITCH YAW" />
+  <origin xyz="0 -0.20 0.12" rpy="0 0 -0.78539816339" />
 </joint>
 
 <joint name="base_link_to_imu_frame" type="fixed">
@@ -84,4 +84,4 @@ ros2_ws/src/alohamini_description/urdf/alohamini_nav.urdf
 </joint>
 ```
 
-Nav2 当前按前向导航配置：局部规划器不采样横移和倒退，默认行为树不包含 BackUp recovery；需要去后方目标时先原地转身再前进。推荐链路由 `alohamini_base_control` 直接发布 `/odom` 与 `odom -> base_link` TF。旧 ZMQ bridge 备用链路仍可通过 `sensors_bridge.launch.py` 使用 EKF、`/wheel/odom` 和 `/cmd_vel_safe`。
+Nav2 当前按前向导航配置：局部规划器不采样横移和倒退，默认行为树不包含 BackUp recovery；需要去后方目标时先原地转身再前进。推荐链路由 `alohamini_base_control` 直接发布 `/odom` 与 `odom -> base_footprint` TF。旧 ZMQ bridge 备用链路仍可通过 `sensors_bridge.launch.py` 使用 EKF、`/wheel/odom` 和 `/cmd_vel_safe`。

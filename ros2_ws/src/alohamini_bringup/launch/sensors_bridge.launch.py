@@ -15,6 +15,7 @@ def generate_launch_description():
     bridge_cmd_vel_topic = LaunchConfiguration("bridge_cmd_vel_topic")
     bridge_odom_topic = LaunchConfiguration("bridge_odom_topic")
     bridge_publish_tf = LaunchConfiguration("bridge_publish_tf")
+    bridge_base_frame = LaunchConfiguration("bridge_base_frame")
     ekf_params_file = LaunchConfiguration("ekf_params_file")
     enable_scan_filter = LaunchConfiguration("enable_scan_filter")
     enable_collision_monitor = LaunchConfiguration("enable_collision_monitor")
@@ -71,7 +72,12 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "bridge_publish_tf",
                 default_value="false",
-                description="Disable bridge TF when EKF publishes odom->base_link.",
+                description="Disable bridge TF when EKF publishes odom->base_footprint.",
+            ),
+            DeclareLaunchArgument(
+                "bridge_base_frame",
+                default_value="base_footprint",
+                description="Raw bridge odometry child frame; EKF republishes odom->base_footprint.",
             ),
             DeclareLaunchArgument("ekf_params_file", default_value=default_ekf_params),
             DeclareLaunchArgument(
@@ -123,6 +129,13 @@ def generate_launch_description():
                 launch_arguments={
                     "use_joint_state_publisher": use_joint_state_publisher,
                 }.items(),
+            ),
+            Node(
+                package="tf2_ros",
+                executable="static_transform_publisher",
+                name="base_footprint_to_base_link",
+                output="screen",
+                arguments=["0", "0", "0", "1.57079632679", "0", "0", "base_footprint", "base_link"],
             ),
             Node(
                 package="robot_localization",
@@ -178,6 +191,7 @@ def generate_launch_description():
                     "obs_port": obs_port,
                     "cmd_vel_topic": bridge_cmd_vel_topic,
                     "odom_topic": bridge_odom_topic,
+                    "base_frame": bridge_base_frame,
                     "publish_tf": bridge_publish_tf,
                     "linear_x_scale": linear_x_scale,
                     "linear_y_scale": linear_y_scale,

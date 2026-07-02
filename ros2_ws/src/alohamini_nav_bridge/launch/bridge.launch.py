@@ -11,6 +11,7 @@ def generate_launch_description():
     cmd_vel_topic = LaunchConfiguration("cmd_vel_topic")
     odom_topic = LaunchConfiguration("odom_topic")
     publish_tf = LaunchConfiguration("publish_tf")
+    base_frame = LaunchConfiguration("base_frame")
     linear_x_scale = LaunchConfiguration("linear_x_scale")
     linear_y_scale = LaunchConfiguration("linear_y_scale")
     angular_z_scale = LaunchConfiguration("angular_z_scale")
@@ -32,6 +33,7 @@ def generate_launch_description():
             DeclareLaunchArgument("cmd_vel_topic", default_value="/cmd_vel"),
             DeclareLaunchArgument("odom_topic", default_value="/odom"),
             DeclareLaunchArgument("publish_tf", default_value="true"),
+            DeclareLaunchArgument("base_frame", default_value="base_link"),
             DeclareLaunchArgument("linear_x_scale", default_value="1.0"),
             DeclareLaunchArgument("linear_y_scale", default_value="1.0"),
             DeclareLaunchArgument("angular_z_scale", default_value="1.0"),
@@ -57,7 +59,7 @@ def generate_launch_description():
                         "cmd_vel_topic": cmd_vel_topic,
                         "odom_topic": odom_topic,
                         "odom_frame": "odom",
-                        "base_frame": "base_link",
+                        "base_frame": base_frame,
                         "publish_tf": publish_tf,
                         "rate_hz": 30.0,
                         "cmd_timeout_sec": 0.5,
