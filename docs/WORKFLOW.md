@@ -201,7 +201,7 @@ ros2 run tf2_ros tf2_echo map base_link
 
 ## 7. RViz 可视化
 
-建图和导航时都可以开 RViz。推荐方式是在本机/开发机运行 RViz，树莓派只运行 LeRobot host、micro-ROS Agent、`alohamini_nav2` 容器和机器人进程。
+建图和导航时都可以开 RViz。推荐方式是在本机/开发机运行 RViz，树莓派只运行 `micro-ROS Agent`、`alohamini_nav2` 容器和机器人进程。
 
 ### 7.1 本机已有 ROS2 Humble
 
