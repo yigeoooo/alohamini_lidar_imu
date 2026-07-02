@@ -1,28 +1,10 @@
 # AlohaMini 雷达 / IMU 建图、导航、RViz 完整使用流程
 
-所有 ROS2/Nav2 命令默认在：
-
 ```bash
 cd ~/alohamini_lidar_imu
 ```
 
-## 1. 启动 LeRobot AlohaMini host
-
-在树莓派端进入 LeRobot 工程：
-
-```bash
-cd ~/lerobot_alohamini
-```
-
-根据你的真机型号选择一个命令：
-
-```bash
-python -m lerobot.robots.alohamini.lekiwi_host --robot_model alohamini1
-python -m lerobot.robots.alohamini.lekiwi_host --robot_model alohamini2
-python -m lerobot.robots.alohamini.lekiwi_host --robot_model alohamini2pro
-```
-
-## 2. 启动 micro-ROS Agent
+## 1. 启动 micro-ROS Agent
 
 micro-ROS Agent 负责把开发板发布的雷达和 IMU 数据接入 ROS2 网络。
 
@@ -40,13 +22,13 @@ docker logs -f microros_agent
 
 应能看到 micro-ROS session、topic、datawriter 创建日志。
 
-## 3. 启动 / 进入 Nav2 容器
+## 2. 启动 / 进入 Nav2 容器
 
 ```bash
-docker exec -it alohamini_nav2 bash
+docker exec -it alohamini_nav2 /bin/bash
 ```
 
-## 4. 构建 ROS2 工作空间
+## 3. 构建 ROS2 工作空间
 
 进入alohamini_nav2容器后，在树莓派执行：
 
@@ -66,54 +48,7 @@ alohamini_nav_bridge
 alohamini_bringup
 ```
 
-## 5. 当前阶段检查：传感器、TF、odom、底盘驱动（首次联调或故障排查）
-
-这一节只是独立检查，不是建图或导航时必须额外运行的步骤。`mapping_ros2_control.launch.py` 和 `navigation_ros2_control.launch.py` 都会自动包含 `sensors_ros2_control.launch.py`，因此建图或导航运行时不要再单独启动本节的 sensors launch。
-
-以后命令均在树莓派端执行。
-
-先确认 micro-ROS Agent 已运行；使用 ros2_control 时不要同时运行 LeRobot host，避免抢同一条 Feetech 串口。
-
-在 `alohamini_nav2` 容器内启动基础 bringup：
-
-```bash
-source /opt/ros/humble/setup.bash
-source /root/ws/install/setup.bash
-export ROS_DOMAIN_ID=5
-
-ros2 launch alohamini_bringup sensors_ros2_control.launch.py serial_port:=/dev/ttyACM0
-```
-
-默认 `/scan_filtered` 只保留物理前方扇区。由于当前 MS200 固件发布的 LaserScan 0° 对应机器人左侧，物理前方对应 -90°，默认保留 `[-180°, 0°]`，并在 `/scan_sector_marker` 发布 RViz 半透明扇形，避开前置雷达被机身遮挡的后方数据；只有现场确认雷达无遮挡时，才覆盖 `scan_min_angle` / `scan_max_angle` 扩大扇区。`sensors_ros2_control.launch.py` 会启动 `alohamini_base_control`，由 `OmniBaseController` 发布 `/odom` 和 `odom -> base_footprint` TF。
-
-旧 ZMQ bridge 备用检查命令：
-
-```bash
-ros2 launch alohamini_bringup sensors_bridge.launch.py host:=127.0.0.1
-```
-
-如果 ZMQ loopback 不通，可把 host 换成树莓派 IP：`host:=192.168.10.157`。
-
-另开一个容器 shell 检查：
-
-```bash
-source /opt/ros/humble/setup.bash
-source /root/ws/install/setup.bash
-export ROS_DOMAIN_ID=5
-
-ros2 topic list
-ros2 topic echo /scan --once
-ros2 topic echo /imu --once
-ros2 topic hz /scan
-ros2 topic hz /imu
-ros2 topic hz /odom
-
-ros2 run tf2_ros tf2_echo base_link laser_frame
-ros2 run tf2_ros tf2_echo base_link imu_frame
-ros2 run tf2_ros tf2_echo odom base_link
-```
-
-## 6. 建图
+## 4. 建图
 
 ### 方式 A：带键盘保存的建图会话
 
@@ -156,7 +91,7 @@ export ROS_DOMAIN_ID=5
 ros2 launch alohamini_bringup mapping_ros2_control.launch.py serial_port:=/dev/ttyACM0
 ```
 
-另开 shell 进入容器检查建图输出：
+另开 shell 进入容器检查建图输出(可选)：
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -166,10 +101,13 @@ export ROS_DOMAIN_ID=5
 ros2 run tf2_ros tf2_echo map odom
 ros2 topic echo /map --once
 ```
+rviz界面看到以下参考图片，则说明成功（rviz可视化参考第七章）
 
-## 7. 保存地图
+![rviz建图](./image/5.png)
 
-保存地图有两种方式，取决于第 6 节怎么启动建图。
+## 5. 保存地图
+
+保存地图有两种方式，取决于第 4 节怎么启动建图。
 
 ### 如果使用 `alohamini_mapping_session`
 
@@ -218,9 +156,7 @@ ros2 run nav2_map_server map_saver_cli -f /root/ws/maps/alohamini_map
 ~/alohamini_lidar_imu/ros2_ws/maps/
 ```
 
-## 8. 导航
-
-导航前必须关闭建图 launch，避免 SLAM Toolbox 和 AMCL 同时处理 `map -> odom`。
+## 6. 导航
 
 启动导航：
 
@@ -234,18 +170,7 @@ ros2 launch alohamini_bringup navigation_ros2_control.launch.py \
   map:=/root/ws/maps/alohamini_map.yaml
 ```
 
-导航阶段由 AMCL 发布 `map -> odom`，`OmniBaseController` 发布 `odom -> base_footprint`，Nav2 发布 `/cmd_vel` 后直接驱动 ros2_control 底盘控制器。
-
-当前 Nav2 参数按前向导航配置，局部规划器和速度平滑器只允许前进和原地旋转；默认行为树不包含 BackUp recovery。需要去后方目标时让机器人先转身，再向前行驶；初次导航应先用低速短距离目标观察 local costmap、LaserScan 和 `/odom`。
-
-### 8.1 怎么确认起点和终点
-
-点到点导航的“点”都在同一张保存好的地图 `map` 坐标系里。
-
-```text
-起点：机器人当前在地图里的位姿，也就是 AMCL 估计出的 map -> base_link。
-终点：你在 RViz 里给 Nav2 的目标位姿，也就是 goal pose。
-```
+### 6.1 怎么确认起点和终点
 
 ```text
 1. RViz Fixed Frame 设为 map。
@@ -274,11 +199,11 @@ ros2 run tf2_ros tf2_echo map base_link
 
 如果起点没对准，导航会从错误位置规划；如果终点点在障碍物、未知区域或代价地图外，Nav2 可能不会生成 plan，或者很快失败。
 
-## 9. RViz 可视化
+## 7. RViz 可视化
 
 建图和导航时都可以开 RViz。推荐方式是在本机/开发机运行 RViz，树莓派只运行 LeRobot host、micro-ROS Agent、`alohamini_nav2` 容器和机器人进程。
 
-### 9.1 本机已有 ROS2 Humble
+### 7.1 本机已有 ROS2 Humble
 
 如果本机是 Ubuntu 22.04，或者已经有可用的 ROS2 Humble 环境，直接使用本机 Humble。确认本机和树莓派在同一网络，并使用同一个 ROS Domain：
 
@@ -305,7 +230,7 @@ export ROS_LOCALHOST_ONLY=0
 ros2 launch alohamini_bringup rviz.launch.py
 ```
 
-### 9.2 本机是 Ubuntu 24.04
+### 7.2 本机是 Ubuntu 24.04
 
 Ubuntu 24.04 不适合作为原生 ROS2 Humble 环境。此时在本机用 Docker 创建一个 Humble RViz 容器，容器通过 host 网络加入树莓派同一个 ROS2 网络。
 
@@ -378,31 +303,3 @@ ros2 launch alohamini_bringup rviz.launch.py
 ```
 
 如果 GUI 打不开，先确认本机正在使用 X11/XWayland，并重新执行 `xhost +local:docker`。
-
-### 9.3 RViz 连接检查
-
-这个 launch 会打开 `ros2_ws/src/alohamini_bringup/rviz/alohamini_nav.rviz`。本机 RViz 只负责可视化和发送初始位姿/导航目标，不需要在本机启动 `sensors_ros2_control.launch.py`、`mapping_ros2_control.launch.py` 或 `navigation_ros2_control.launch.py`。
-
-如果本机看不到树莓派上的话题，先检查：
-
-```bash
-ros2 topic list
-ros2 topic echo /scan_filtered --once
-ros2 topic echo /odom --once
-```
-
-建图或导航时，RViz 重点看：
-
-```text
-Fixed Frame: map
-TF: map -> odom -> base_footprint -> base_link -> laser_frame / imu_frame
-LaserScan: /scan_filtered
-Odometry: /wheel/odom raw bridge odom, /odom EKF filtered odom
-Velocity: /cmd_vel raw Nav2/teleop command, /cmd_vel_safe collision-monitor-filtered command
-Map: /map
-Global Plan: /plan
-Global/Local Costmap: /global_costmap/costmap, /local_costmap/costmap
-```
-
-如果只是启动了第 5 节的基础 bringup，还没有建图或导航，`map` frame 可能不存在。此时可以临时把 RViz Fixed Frame 改成 `odom` 来检查 RobotModel、LaserScan 和 Odometry。
-

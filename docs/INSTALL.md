@@ -149,6 +149,11 @@ apt install -y --no-install-recommends \
   ros-humble-nav2-lifecycle-manager \
   ros-humble-slam-toolbox \
   ros-humble-robot-localization \
+  ros-humble-ros2-control \
+  ros-humble-ros2-controllers \
+  ros-humble-controller-manager \
+  ros-humble-joint-state-broadcaster \
+  ros-humble-realtime-tools \
   ros-humble-tf2-ros \
   ros-humble-tf2-tools \
   ros-humble-robot-state-publisher \
