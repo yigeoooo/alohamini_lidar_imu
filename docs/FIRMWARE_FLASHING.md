@@ -4,7 +4,8 @@ MicroROS 开发板固件烧录命令和操作注意事项。
 
 ## 依赖下载
 ### 1. 开发环境
-1. 开发环境使用ubuntu22.04版本，ros版本使用humble版本。ros2下载参考[此链接](https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html)
+1. 本机开发环境使用ubuntu22.04版本，ros版本使用humble版本。ros2下载参考[此链接](https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html)
+2. 树莓派的ros2环境下载[参考此文档](docs/INSTALL.md)
 
 ### 2. 安装依赖
 1. 打开Ubuntu系统终端，并运行以下命令安装相关依赖。
