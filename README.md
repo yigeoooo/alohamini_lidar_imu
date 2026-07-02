@@ -25,28 +25,21 @@ alohamini_lidar_imu/
 
 - [依赖安装](docs/INSTALL.md)：树莓派宿主机依赖、Docker 镜像、容器创建和 ROS2 依赖安装。
 - [Micro Ros代码烧录](docs/FIRMWARE_FLASHING.md)：micro-ROS 控制板固件烧录记录和 ESP-IDF 使用说明。
-- [工作流程](docs/WORKFLOW.md)：LeRobot host、micro-ROS Agent、建图、保存地图、导航和本机 RViz 可视化流程。
+- [工作流程](docs/WORKFLOW.md)：micro-ROS Agent、建图、保存地图、导航和本机 RViz 可视化流程。
 
 
 ## 当前配置
 
-- 树莓派 IP：`192.168.10.157`
+- 树莓派 IP：`192.168.10.157`（实际IP根据连上网络后自行替换为真实IP地址）
 - micro-ROS Agent UDP 端口：`8090`
 - ROS Domain ID：`5`
 - 原始雷达话题：`/scan`
 - 建图 / 导航雷达话题：`/scan_filtered`，由 `scan_sector_filter` 发布；默认只保留物理前方 `[-180°, 0°]` 扇区
 - IMU 话题：`/imu`
-- 推荐底盘驱动：`alohamini_base_control` ros2_control，直接发布 `/odom` 和 `odom -> base_footprint` TF
-- 推荐速度命令链路：Nav2/teleop 发布 `/cmd_vel`，`OmniBaseController` 直接驱动 Feetech 底盘轮
-- 旧 ZMQ bridge 备用链路：bridge 发布 `/wheel/odom`，由 EKF 融合后输出 `/odom` 和 TF；bridge 订阅 `/cmd_vel_safe`
-- 雷达 frame：`laser_frame`
-- IMU frame：`imu_frame`
-- AlohaMini ZMQ 命令端口：`5555`
-- AlohaMini ZMQ 观测端口：`5556`
 
 ## 树莓派项目位置
 
-推荐在树莓派上保留这个目录：
+项目文件放在树莓派上的位置为：
 
 ```text
 ~/alohamini_lidar_imu/
@@ -83,5 +76,3 @@ ros2_ws/src/alohamini_description/urdf/alohamini_nav.urdf
   <origin xyz="X Y Z" rpy="ROLL PITCH YAW" />
 </joint>
 ```
-
-Nav2 当前按前向导航配置：局部规划器不采样横移和倒退，默认行为树不包含 BackUp recovery；需要去后方目标时先原地转身再前进。推荐链路由 `alohamini_base_control` 直接发布 `/odom` 与 `odom -> base_footprint` TF。旧 ZMQ bridge 备用链路仍可通过 `sensors_bridge.launch.py` 使用 EKF、`/wheel/odom` 和 `/cmd_vel_safe`。
