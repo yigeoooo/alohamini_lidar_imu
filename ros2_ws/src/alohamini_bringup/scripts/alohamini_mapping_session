@@ -224,7 +224,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--serial-port", default="/dev/ttyACM0", help="ros2_control base serial port")
     parser.add_argument("--baud-rate", default="1000000", help="ros2_control serial baud rate")
-    parser.add_argument("--base-yaw-deg", default="-135.0", help="ros2_control base_footprint->base_link static yaw in degrees")
+    parser.add_argument("--base-yaw-deg", default="90.0", help="ros2_control base_footprint->base_link static yaw in degrees")
     parser.add_argument(
         "--use-mock-hardware",
         action="store_true",

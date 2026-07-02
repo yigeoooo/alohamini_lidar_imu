@@ -47,7 +47,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("baud_rate", default_value="1000000"),
             DeclareLaunchArgument("use_mock_hardware", default_value="false"),
-            DeclareLaunchArgument("base_yaw_deg", default_value="-135.0"),
+            DeclareLaunchArgument("base_yaw_deg", default_value="90.0"),
             DeclareLaunchArgument("slam_params_file", default_value=default_slam_params),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(sensors_launch),

@@ -74,7 +74,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "base_yaw_deg",
-                default_value="-135.0",
+                default_value="90.0",
                 description="Static yaw (deg) of base_footprint->base_link; tune if RViz forward/left look wrong.",
             ),
             DeclareLaunchArgument("scan_input_topic", default_value="/scan"),
