@@ -81,8 +81,8 @@ def generate_launch_description():
             DeclareLaunchArgument("scan_topic", default_value="/scan_filtered"),
             DeclareLaunchArgument("scan_marker_topic", default_value="/scan_sector_marker"),
             DeclareLaunchArgument("scan_marker_range", default_value="1.0"),
-            DeclareLaunchArgument("scan_min_angle", default_value="-1.57079632679"),
-            DeclareLaunchArgument("scan_max_angle", default_value="1.57079632679"),
+            DeclareLaunchArgument("scan_min_angle", default_value="-3.14159265359"),
+            DeclareLaunchArgument("scan_max_angle", default_value="0.0"),
             # Base: robot_state_publisher + controller_manager + wheel controllers.
             # Remap the broadcaster's /joint_states to /wheel_joint_states so it does
             # not clash with the merged /joint_states below.

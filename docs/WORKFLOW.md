@@ -84,7 +84,7 @@ export ROS_DOMAIN_ID=5
 ros2 launch alohamini_bringup sensors_ros2_control.launch.py serial_port:=/dev/ttyACM0
 ```
 
-默认 `/scan_filtered` 只保留 `/scan` 的前方 `[-90°, +90°]` 扇区，并在 `/scan_sector_marker` 发布 RViz 半透明扇形，避开前置雷达被机身遮挡的后方数据；只有现场确认雷达无遮挡时，才覆盖 `scan_min_angle` / `scan_max_angle` 扩大扇区。`sensors_ros2_control.launch.py` 会启动 `alohamini_base_control`，由 `OmniBaseController` 发布 `/odom` 和 `odom -> base_footprint` TF。
+默认 `/scan_filtered` 只保留物理前方扇区。由于当前 MS200 固件发布的 LaserScan 0° 对应机器人左侧，物理前方对应 -90°，默认保留 `[-180°, 0°]`，并在 `/scan_sector_marker` 发布 RViz 半透明扇形，避开前置雷达被机身遮挡的后方数据；只有现场确认雷达无遮挡时，才覆盖 `scan_min_angle` / `scan_max_angle` 扩大扇区。`sensors_ros2_control.launch.py` 会启动 `alohamini_base_control`，由 `OmniBaseController` 发布 `/odom` 和 `odom -> base_footprint` TF。
 
 旧 ZMQ bridge 备用检查命令：
 

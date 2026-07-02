@@ -1066,14 +1066,14 @@
   <!-- Navigation sensor frames added for micro-ROS lidar/IMU topics.
        base_link is the SolidWorks/CAD frame here. The lidar is mounted on the
        visual front side of the robot, which is base_link -Y in this model.
-       With the ros2_control base_footprint->base_link yaw of -135 deg, the
-       laser origin below is equivalent to base_footprint xyz ~= -0.14 0.14 0.12,
-       and LaserScan angle 0 is rotated 45 deg left from the previous mount estimate to point through the visual front. Replace these
-       values after measuring the real robot extrinsics. Frame names must match
-       /scan.header.frame_id and /imu.header.frame_id. -->
+       With the ros2_control base_footprint->base_link yaw of +90 deg, this
+       places the laser at base_footprint xyz ~= 0.20 0.00 0.12. The MS200
+       scan stream used by the firmware has LaserScan angle 0 pointing toward
+       base_footprint +Y, so physical forward is LaserScan angle -90 deg.
+       Frame names must match /scan.header.frame_id and /imu.header.frame_id. -->
   <link name="laser_frame" />
   <joint name="base_link_to_laser_frame" type="fixed">
-    <origin xyz="0 -0.20 0.12" rpy="0 0 -0.78539816339" />
+    <origin xyz="0 -0.20 0.12" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="laser_frame" />
   </joint>

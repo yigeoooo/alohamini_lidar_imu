@@ -116,13 +116,13 @@ def generate_launch_description():
             DeclareLaunchArgument("scan_topic", default_value="/scan_filtered"),
             DeclareLaunchArgument(
                 "scan_min_angle",
-                default_value="-1.57079632679",
-                description="Minimum scan angle to keep in radians; default keeps the forward lidar sector.",
+                default_value="-3.14159265359",
+                description="Minimum scan angle to keep in radians; default keeps the physical front sector.",
             ),
             DeclareLaunchArgument(
                 "scan_max_angle",
-                default_value="1.57079632679",
-                description="Maximum scan angle to keep in radians; default keeps the forward lidar sector.",
+                default_value="0.0",
+                description="Maximum scan angle to keep in radians; default keeps the physical front sector.",
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(description_launch),

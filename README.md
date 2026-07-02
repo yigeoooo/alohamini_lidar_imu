@@ -34,7 +34,7 @@ alohamini_lidar_imu/
 - micro-ROS Agent UDP 端口：`8090`
 - ROS Domain ID：`5`
 - 原始雷达话题：`/scan`
-- 建图 / 导航雷达话题：`/scan_filtered`，由 `scan_sector_filter` 发布；默认只保留前方 `[-90°, +90°]` 扇区
+- 建图 / 导航雷达话题：`/scan_filtered`，由 `scan_sector_filter` 发布；默认只保留物理前方 `[-180°, 0°]` 扇区
 - IMU 话题：`/imu`
 - 推荐底盘驱动：`alohamini_base_control` ros2_control，直接发布 `/odom` 和 `odom -> base_footprint` TF
 - 推荐速度命令链路：Nav2/teleop 发布 `/cmd_vel`，`OmniBaseController` 直接驱动 Feetech 底盘轮
@@ -69,14 +69,14 @@ export ROS_DOMAIN_ID=5
 ros2_ws/src/alohamini_description/urdf/alohamini_nav.urdf
 ```
 
-- `laser_frame`：URDF 里写在 CAD `base_link` 坐标下：`xyz="0 -0.20 0.12"`、`rpy="0 0 -0.78539816339"`；经 `base_footprint→base_link` -135° 静态变换后，等效到机器人视觉前方中线，`base_footprint` 约 `xyz="-0.14 0.14 0.12"`，且 LaserScan 0° 相对初始值向左旋转 45°，朝视觉正前方。
+- `laser_frame`：URDF 里写在 CAD `base_link` 坐标下：`xyz="0 -0.20 0.12"`、`rpy="0 0 0"`；经 `base_footprint→base_link` +90° 静态变换后，等效到机器人视觉前方中线，`base_footprint` 约 `xyz="0.20 0.00 0.12"`。当前 MS200 固件发布的 LaserScan 0° 对应 `base_footprint` +Y，物理正前方对应 LaserScan -90°。
 - `imu_frame`：URDF 里写在 CAD `base_link` 坐标下：`xyz="0.00978916757496985 0.00084647910851246 0.344753325406094"`，等效为 `base_footprint` 下的 base inertial origin，作为当前质心估计。
 
 后续量出真实安装位置后，仍建议复核并修改这两个 fixed joint：
 
 ```xml
 <joint name="base_link_to_laser_frame" type="fixed">
-  <origin xyz="0 -0.20 0.12" rpy="0 0 -0.78539816339" />
+  <origin xyz="0 -0.20 0.12" rpy="0 0 0" />
 </joint>
 
 <joint name="base_link_to_imu_frame" type="fixed">
