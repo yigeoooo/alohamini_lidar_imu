@@ -271,6 +271,7 @@ docker run -it \
 apt update
 apt install -y --no-install-recommends \
   ros-humble-nav2-rviz-plugins \
+  ros-humble-image-transport-plugins \
   python3-colcon-common-extensions
 
 cd /root/ws

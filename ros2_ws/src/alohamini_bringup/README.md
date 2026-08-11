@@ -9,10 +9,6 @@ AlohaMini 的 SLAM 建图与 Nav2 导航 bringup。提供**两套底盘驱动**�
 |------|-----------|------|------|------|
 | **ros2_control（推荐）** | `sensors_ros2_control.launch.py` | `mapping_ros2_control.launch.py` | `navigation_ros2_control.launch.py` | C++ 原生串口驱动 `alohamini_base_control`，直接按 Feetech 协议驱动底盘，无需 lerobot host |
 | ZMQ 桥（旧） | `sensors_bridge.launch.py` | `mapping.launch.py` | `navigation.launch.py` | Python `alohamini_nav_bridge`，需在机器人上另跑 `lekiwi_host.py` |
-
-两套对外接口完全一致（`/cmd_vel`、`/odom`、`odom→base_footprint` TF、`/scan_filtered`），
-SLAM 和 Nav2 配置（`config/slam_toolbox.yaml`、`config/nav2_params.yaml`）无需任何改动。
-
 ## ros2_control 版用法（推荐）
 
 先确保工作区已构建、每个终端都 source：

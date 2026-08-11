@@ -70,6 +70,18 @@ Visualization Manager:
       Update Interval: 0
       Value: true
       Visual Enabled: true
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Head Camera
+      Normalize Range: true
+      Queue Size: 1
+      Transport Hint: compressed
+      Unreliable: true
+      Topic: /head_camera/image_raw/compressed
+      Value: true
     - Alpha: 0.7
       Class: rviz_default_plugins/Map
       Color Scheme: map

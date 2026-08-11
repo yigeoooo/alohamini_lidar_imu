@@ -121,6 +121,7 @@ docker run -dit \
   --net=host \
   --ipc=host \
   --privileged \
+  --device="$(readlink -f /dev/am_camera_forward):/dev/am_camera_forward:rwm" \
   -e ROS_DOMAIN_ID=5 \
   -e ROS_LOCALHOST_ONLY=0 \
   -e RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
@@ -134,6 +135,12 @@ docker run -dit \
 
 ```bash
 docker exec -it alohamini_nav2 bash
+```
+
+进入容器后确认前摄像头映射：
+
+```bash
+ls -l /dev/am_camera_forward
 ```
 
 ## 6. 在 Nav2 容器内安装 ROS2 依赖
@@ -160,8 +167,10 @@ apt install -y --no-install-recommends \
   ros-humble-joint-state-publisher \
   ros-humble-xacro \
   ros-humble-laser-filters \
+  ros-humble-image-transport-plugins \
   ros-humble-teleop-twist-keyboard \
   ros-humble-rmw-fastrtps-cpp \
+  libopencv-dev \
   python3-colcon-common-extensions \
   python3-pip \
   python3-zmq \

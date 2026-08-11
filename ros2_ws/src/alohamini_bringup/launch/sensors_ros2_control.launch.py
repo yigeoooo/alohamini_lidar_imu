@@ -17,6 +17,7 @@
 #   - robot_description + full /joint_states -> TF tree (odom->base_footprint->base_link->sensors)
 #   - /scan_filtered (sector-limited laser)
 #   - /cmd_vel subscriber + /odom (+ odom->base_footprint TF) via OmniBaseController
+#   - head camera publisher for the PC-side RViz view
 #
 # Joint-state handling: base_control's joint_state_broadcaster publishes only the
 # three wheel joints (remapped here to /wheel_joint_states). A joint_state_publisher
@@ -29,6 +30,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -46,9 +48,20 @@ def generate_launch_description():
     scan_marker_range = LaunchConfiguration("scan_marker_range")
     scan_min_angle = LaunchConfiguration("scan_min_angle")
     scan_max_angle = LaunchConfiguration("scan_max_angle")
+    enable_head_camera = LaunchConfiguration("enable_head_camera")
+    head_camera_device = LaunchConfiguration("head_camera_device")
+    head_camera_image_topic = LaunchConfiguration("head_camera_image_topic")
+    head_camera_frame_id = LaunchConfiguration("head_camera_frame_id")
+    head_camera_fps = LaunchConfiguration("head_camera_fps")
+    head_camera_width = LaunchConfiguration("head_camera_width")
+    head_camera_height = LaunchConfiguration("head_camera_height")
+    head_camera_jpeg_quality = LaunchConfiguration("head_camera_jpeg_quality")
 
     base_control_launch = PathJoinSubstitution(
         [FindPackageShare("alohamini_base_control"), "launch", "base_control.launch.py"]
+    )
+    head_camera_launch = PathJoinSubstitution(
+        [FindPackageShare("alohamini_bringup"), "launch", "head_camera.launch.py"]
     )
 
     # URDF for the arm/lift joints that joint_state_publisher fills with zeros.
@@ -83,6 +96,14 @@ def generate_launch_description():
             DeclareLaunchArgument("scan_marker_range", default_value="1.0"),
             DeclareLaunchArgument("scan_min_angle", default_value="-3.14159265359"),
             DeclareLaunchArgument("scan_max_angle", default_value="0.0"),
+            DeclareLaunchArgument("enable_head_camera", default_value="true"),
+            DeclareLaunchArgument("head_camera_device", default_value="/dev/am_camera_forward"),
+            DeclareLaunchArgument("head_camera_image_topic", default_value="/head_camera/image_raw"),
+            DeclareLaunchArgument("head_camera_frame_id", default_value="head_camera"),
+            DeclareLaunchArgument("head_camera_fps", default_value="20.0"),
+            DeclareLaunchArgument("head_camera_width", default_value="640"),
+            DeclareLaunchArgument("head_camera_height", default_value="480"),
+            DeclareLaunchArgument("head_camera_jpeg_quality", default_value="80"),
             # Base: robot_state_publisher + controller_manager + wheel controllers.
             # Remap the broadcaster's /joint_states to /wheel_joint_states so it does
             # not clash with the merged /joint_states below.
@@ -94,6 +115,19 @@ def generate_launch_description():
                     "use_mock_hardware": use_mock_hardware,
                     "base_yaw_deg": base_yaw_deg,
                     "joint_states_topic": "/wheel_joint_states",
+                }.items(),
+            ),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(head_camera_launch),
+                condition=IfCondition(enable_head_camera),
+                launch_arguments={
+                    "device": head_camera_device,
+                    "image_topic": head_camera_image_topic,
+                    "frame_id": head_camera_frame_id,
+                    "fps": head_camera_fps,
+                    "width": head_camera_width,
+                    "height": head_camera_height,
+                    "jpeg_quality": head_camera_jpeg_quality,
                 }.items(),
             ),
             # Merge wheel states (real, from broadcaster) with zero defaults for the
