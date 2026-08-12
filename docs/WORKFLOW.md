@@ -10,8 +10,7 @@ micro-ROS Agent 负责把开发板发布的雷达和 IMU 数据接入 ROS2 网�
 
 ```bash
 cd ~/alohamini_lidar_imu
-
-docker start microros_agent
+./ros2_ws/src/alohamini_bringup/scripts/start_microros_agent_after_time_sync
 ```
 
 查看日志：
@@ -50,7 +49,7 @@ alohamini_bringup
 
 ## 4. 建图
 
-### 方式 A：带键盘保存的建图会话
+### 带键盘保存的建图会话
 
 推荐现场使用这个方式。默认启动 `mapping_ros2_control.launch.py`，同时提供按键保存地图：
 
@@ -61,8 +60,11 @@ export ROS_DOMAIN_ID=5
 
 ros2 run alohamini_bringup alohamini_mapping_session \
   --serial-port /dev/ttyACM0 \
-  --map /root/ws/maps/alohamini_map
+  --map /root/ws/maps/alohamini_map \
+  --enable-head-camera
 ```
+
+如需关闭摄像头，不传 `--enable-head-camera`。
 
 按键含义：
 
@@ -79,68 +81,21 @@ q           不保存，停止建图 launch 并退出
 Ctrl+C      不保存，停止建图 launch 并退出
 ```
 
-### 方式 B：直接启动 mapping_ros2_control.launch.py
 
-这种方式更接近 ROS 原生命令。保存地图时需要另开一个容器 shell 执行 `map_saver_cli`。旧 ZMQ bridge 路径仍可用：`mapping.launch.py host:=127.0.0.1`，但建图优先使用 ros2_control。
 
-```bash
-source /opt/ros/humble/setup.bash
-source /root/ws/install/setup.bash
-export ROS_DOMAIN_ID=5
 
-ros2 launch alohamini_bringup mapping_ros2_control.launch.py serial_port:=/dev/ttyACM0
-```
-
-另开 shell 进入容器检查建图输出(可选)：
-
-```bash
-source /opt/ros/humble/setup.bash
-source /root/ws/install/setup.bash
-export ROS_DOMAIN_ID=5
-
-ros2 run tf2_ros tf2_echo map odom
-ros2 topic echo /map --once
 ```
 rviz界面看到以下参考图片，则说明成功（rviz可视化参考第七章）
 
 ![rviz建图](./image/5.png)
 
-## 5. 保存地图
+## 5. 保存地图。
 
-保存地图有两种方式，取决于第 4 节怎么启动建图。
-
-### 如果使用 `alohamini_mapping_session`
-
-不需要另开保存终端，直接在建图会话终端按键：
+建图会话终端按键：
 
 ```text
 Shift+S  保存当前地图，建图继续运行
 Shift+X  保存当前地图，保存成功后停止建图 launch 并退出
-```
-
-### 如果直接使用 `mapping_ros2_control.launch.py`
-
-需要另开一个终端执行保存命令，并且保存时不要先关闭建图 launch。
-
-正确顺序：
-
-```text
-1. 建图 launch 继续运行。
-2. 新开一个 alohamini_nav2 容器 shell。
-3. 执行 map_saver_cli 保存地图。
-4. 看到保存成功后，再回到建图终端 Ctrl+C 停止建图 launch。
-```
-
-`Ctrl+C` 只会退出建图进程，不会自动保存地图；只有 `alohamini_mapping_session` 的 `Shift+X` 会执行“保存成功后退出”。
-
-另开 shell 保存地图：
-
-```bash
-source /opt/ros/humble/setup.bash
-source /root/ws/install/setup.bash
-mkdir -p /root/ws/maps
-
-ros2 run nav2_map_server map_saver_cli -f /root/ws/maps/alohamini_map
 ```
 
 生成文件：
@@ -167,8 +122,11 @@ export ROS_DOMAIN_ID=5
 
 ros2 launch alohamini_bringup navigation_ros2_control.launch.py \
   serial_port:=/dev/ttyACM0 \
-  map:=/root/ws/maps/alohamini_map.yaml
+  map:=/root/ws/maps/alohamini_map.yaml \
+  enable_head_camera:=true
 ```
+
+如需关闭摄像头，将命令中的参数改为 `enable_head_camera:=false`。
 
 ### 6.1 怎么确认起点和终点
 
@@ -180,13 +138,6 @@ ros2 launch alohamini_bringup navigation_ros2_control.launch.py \
 5. 再看 RobotModel、LaserScan 和地图是否对齐。
 ```
 
-容器内可以辅助检查当前起点估计：
-
-```bash
-ros2 topic echo /amcl_pose --once
-ros2 run tf2_ros tf2_echo map base_link
-```
-
 终点在 RViz 里给：
 
 ```text
@@ -196,8 +147,6 @@ ros2 run tf2_ros tf2_echo map base_link
 4. 先给 0.5m 到 1m 的短距离目标。
 5. 看到 global plan / local plan 出现后，再观察机器人是否开始低速移动。
 ```
-
-如果起点没对准，导航会从错误位置规划；如果终点点在障碍物、未知区域或代价地图外，Nav2 可能不会生成 plan，或者很快失败。
 
 ## 7. RViz 可视化
 
@@ -291,6 +240,11 @@ export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 ros2 launch alohamini_bringup rviz.launch.py
 ```
 
+机器人视角：
+* 找到左侧Head Camera
+* 点开选择Topic -> Reliability Policy -> 选择Best Effort 即可在上方显示图像位置看到相机图像
+![头部摄像头](./image/6.png)
+
 以后再次使用这个本机 RViz 容器：
 
 ```bash
@@ -303,4 +257,3 @@ export ROS_LOCALHOST_ONLY=0
 ros2 launch alohamini_bringup rviz.launch.py
 ```
 
-如果 GUI 打不开，先确认本机正在使用 X11/XWayland，并重新执行 `xhost +local:docker`。

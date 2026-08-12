@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import math
+import time
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
 from geometry_msgs.msg import Point
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Header
 from visualization_msgs.msg import Marker
 
 
@@ -27,7 +30,13 @@ class ScanSectorFilter(Node):
         self.declare_parameter("min_angle", -math.pi / 2.0)
         self.declare_parameter("max_angle", math.pi / 2.0)
         self.declare_parameter("use_nan", False)
+        self.declare_parameter("restamp_to_local_clock", True)
+        self.declare_parameter("stale_stamp_warning_sec", 1.0)
+        self.declare_parameter("max_scan_age_sec", 0.5)
+        self.declare_parameter("max_future_stamp_sec", 0.2)
+        self.declare_parameter("drop_out_of_order", True)
         self.declare_parameter("marker_topic", "/scan_sector_marker")
+        self.declare_parameter("marker_publish_rate", 1.0)
         self.declare_parameter("marker_range", 1.0)
         self.declare_parameter("marker_segments", 32)
 
@@ -36,12 +45,33 @@ class ScanSectorFilter(Node):
         self.min_angle = float(self.get_parameter("min_angle").value)
         self.max_angle = float(self.get_parameter("max_angle").value)
         self.replacement = math.nan if as_bool(self.get_parameter("use_nan").value) else math.inf
+        self.restamp_to_local_clock = as_bool(self.get_parameter("restamp_to_local_clock").value)
+        self.stale_stamp_warning_sec = max(
+            0.0, float(self.get_parameter("stale_stamp_warning_sec").value)
+        )
+        self.max_scan_age_sec = max(0.0, float(self.get_parameter("max_scan_age_sec").value))
+        self.max_future_stamp_sec = max(
+            0.0, float(self.get_parameter("max_future_stamp_sec").value)
+        )
+        self.drop_out_of_order = as_bool(self.get_parameter("drop_out_of_order").value)
+        self.last_stale_stamp_warning_ns = 0
+        self.last_drop_warning_ns = 0
+        self.last_input_stamp_ns = None
+        self.dropped_stale = 0
+        self.dropped_future = 0
+        self.dropped_out_of_order = 0
         self.marker_topic = self.get_parameter("marker_topic").value
+        self.marker_publish_rate = max(
+            0.0, float(self.get_parameter("marker_publish_rate").value)
+        )
+        self.last_marker_publish_monotonic = 0.0
         self.marker_range = max(0.05, float(self.get_parameter("marker_range").value))
         self.marker_segments = max(2, int(self.get_parameter("marker_segments").value))
 
         self.publisher = self.create_publisher(LaserScan, self.output_topic, qos_profile_sensor_data)
-        self.marker_publisher = self.create_publisher(Marker, self.marker_topic, 1)
+        self.marker_publisher = self.create_publisher(
+            Marker, self.marker_topic, qos_profile_sensor_data
+        )
         self.subscription = self.create_subscription(
             LaserScan,
             self.input_topic,
@@ -51,6 +81,8 @@ class ScanSectorFilter(Node):
         self.get_logger().info(
             f"Filtering {self.input_topic} -> {self.output_topic}; "
             f"keeping angles [{self.min_angle:.3f}, {self.max_angle:.3f}] rad"
+            f"; restamp_to_local_clock={self.restamp_to_local_clock}"
+            f"; max_scan_age_sec={self.max_scan_age_sec:.3f}"
             f"; publishing sector marker on {self.marker_topic}"
         )
 
@@ -77,9 +109,15 @@ class ScanSectorFilter(Node):
         point.z = 0.02
         return point
 
-    def publish_sector_marker(self, msg: LaserScan) -> None:
+    def publish_sector_marker(self, header) -> None:
+        if self.marker_publish_rate <= 0.0:
+            return
+        now_monotonic = time.monotonic()
+        if now_monotonic - self.last_marker_publish_monotonic < 1.0 / self.marker_publish_rate:
+            return
+        self.last_marker_publish_monotonic = now_monotonic
         marker = Marker()
-        marker.header = msg.header
+        marker.header = header
         marker.ns = "scan_sector_filter"
         marker.id = 0
         marker.type = Marker.TRIANGLE_LIST
@@ -104,9 +142,80 @@ class ScanSectorFilter(Node):
 
         self.marker_publisher.publish(marker)
 
+    def warn_drop_throttled(self, reason: str, age_sec: float) -> None:
+        now_ns = self.get_clock().now().nanoseconds
+        if now_ns - self.last_drop_warning_ns < 5_000_000_000:
+            return
+        self.get_logger().warn(
+            f"Dropping {self.input_topic} ({reason}, age={age_sec:+.3f} s); "
+            f"totals: stale={self.dropped_stale}, future={self.dropped_future}, "
+            f"out_of_order={self.dropped_out_of_order}. Check Pi NTP, ESP32 and micro-ROS Agent."
+        )
+        self.last_drop_warning_ns = now_ns
+
+    def accept_input_stamp(self, msg: LaserScan):
+        now = self.get_clock().now()
+        input_stamp_ns = Time.from_msg(msg.header.stamp).nanoseconds
+        age_sec = (now.nanoseconds - input_stamp_ns) / 1e9
+
+        if self.drop_out_of_order and self.last_input_stamp_ns is not None:
+            if input_stamp_ns <= self.last_input_stamp_ns:
+                self.dropped_out_of_order += 1
+                self.warn_drop_throttled("timestamp did not advance", age_sec)
+                return None
+
+        # Do not restamp packets which have already spent too long in XRCE/DDS
+        # queues: that would disguise old measurements as current obstacles.
+        if self.max_scan_age_sec > 0.0 and age_sec > self.max_scan_age_sec:
+            self.dropped_stale += 1
+            self.warn_drop_throttled("stale timestamp", age_sec)
+            return None
+        if self.max_future_stamp_sec > 0.0 and age_sec < -self.max_future_stamp_sec:
+            self.dropped_future += 1
+            self.warn_drop_throttled("timestamp is in the future", age_sec)
+            return None
+
+        self.last_input_stamp_ns = input_stamp_ns
+        return now, age_sec
+
+    def output_header_for(self, msg: LaserScan, now, age_sec: float):
+        """Return an output header in the Pi's clock domain.
+
+        `/scan` is published by the ESP32 and its clock is synchronized through
+        the micro-ROS Agent.  `/odom` is timestamped by the Pi.  When the Pi's
+        wall clock is corrected after boot, the two domains can temporarily be
+        tens of seconds apart; exact sensor timestamps then make TF consumers
+        reject otherwise fresh scans.  The physical scan is received live over
+        DDS, so for the filtered navigation topic reception time is the safe
+        common clock.
+        """
+        if not self.restamp_to_local_clock:
+            return msg.header
+
+        if (
+            self.stale_stamp_warning_sec > 0.0
+            and abs(age_sec) > self.stale_stamp_warning_sec
+            and now.nanoseconds - self.last_stale_stamp_warning_ns >= 5_000_000_000
+        ):
+            self.get_logger().warn(
+                f"Restamping {self.input_topic}: input timestamp differs from local clock "
+                f"by {age_sec:+.3f} s. Check Pi NTP and micro-ROS Agent time sync."
+            )
+            self.last_stale_stamp_warning_ns = now.nanoseconds
+
+        header = Header()
+        header.frame_id = msg.header.frame_id
+        header.stamp = now.to_msg()
+        return header
+
     def on_scan(self, msg: LaserScan) -> None:
+        stamp_check = self.accept_input_stamp(msg)
+        if stamp_check is None:
+            return
+        now, age_sec = stamp_check
+
         filtered = LaserScan()
-        filtered.header = msg.header
+        filtered.header = self.output_header_for(msg, now, age_sec)
         filtered.angle_min = msg.angle_min
         filtered.angle_max = msg.angle_max
         filtered.angle_increment = msg.angle_increment
@@ -132,7 +241,7 @@ class ScanSectorFilter(Node):
         filtered.ranges = ranges
         filtered.intensities = intensities if has_intensities else list(msg.intensities)
         self.publisher.publish(filtered)
-        self.publish_sector_marker(msg)
+        self.publish_sector_marker(filtered.header)
 
 
 def main(args=None) -> None:

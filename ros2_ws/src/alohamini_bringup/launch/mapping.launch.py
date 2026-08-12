@@ -23,6 +23,12 @@ def generate_launch_description():
     require_observation_for_motion = LaunchConfiguration("require_observation_for_motion")
     use_commanded_yaw_for_odom = LaunchConfiguration("use_commanded_yaw_for_odom")
     commanded_yaw_odom_scale = LaunchConfiguration("commanded_yaw_odom_scale")
+    enable_head_camera = LaunchConfiguration("enable_head_camera")
+    head_camera_device = LaunchConfiguration("head_camera_device")
+    head_camera_fps = LaunchConfiguration("head_camera_fps")
+    head_camera_width = LaunchConfiguration("head_camera_width")
+    head_camera_height = LaunchConfiguration("head_camera_height")
+    head_camera_jpeg_quality = LaunchConfiguration("head_camera_jpeg_quality")
 
     sensors_bridge_launch = PathJoinSubstitution(
         [FindPackageShare("alohamini_bringup"), "launch", "sensors_bridge.launch.py"]
@@ -52,6 +58,12 @@ def generate_launch_description():
             DeclareLaunchArgument("require_observation_for_motion", default_value="false"),
             DeclareLaunchArgument("use_commanded_yaw_for_odom", default_value="true"),
             DeclareLaunchArgument("commanded_yaw_odom_scale", default_value="0.95"),
+            DeclareLaunchArgument("enable_head_camera", default_value="false"),
+            DeclareLaunchArgument("head_camera_device", default_value="/dev/am_camera_forward"),
+            DeclareLaunchArgument("head_camera_fps", default_value="10.0"),
+            DeclareLaunchArgument("head_camera_width", default_value="640"),
+            DeclareLaunchArgument("head_camera_height", default_value="480"),
+            DeclareLaunchArgument("head_camera_jpeg_quality", default_value="70"),
             DeclareLaunchArgument("slam_params_file", default_value=default_slam_params),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(sensors_bridge_launch),
@@ -75,6 +87,12 @@ def generate_launch_description():
                     "require_observation_for_motion": require_observation_for_motion,
                     "use_commanded_yaw_for_odom": use_commanded_yaw_for_odom,
                     "commanded_yaw_odom_scale": commanded_yaw_odom_scale,
+                    "enable_head_camera": enable_head_camera,
+                    "head_camera_device": head_camera_device,
+                    "head_camera_fps": head_camera_fps,
+                    "head_camera_width": head_camera_width,
+                    "head_camera_height": head_camera_height,
+                    "head_camera_jpeg_quality": head_camera_jpeg_quality,
                 }.items(),
             ),
             IncludeLaunchDescription(

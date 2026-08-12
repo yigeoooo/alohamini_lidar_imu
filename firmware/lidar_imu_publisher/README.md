@@ -33,7 +33,10 @@
 ```bash
 docker pull --platform linux/arm64/v8 docker.io/microros/micro-ros-agent:humble
 
-docker run -it --rm \
+docker rm -f microros_agent 2>/dev/null || true
+
+docker create --restart=no \
+  --name microros_agent \
   --platform linux/arm64/v8 \
   -v /dev:/dev \
   -v /dev/shm:/dev/shm \
@@ -42,6 +45,12 @@ docker run -it --rm \
   -e ROS_DOMAIN_ID=5 \
   docker.io/microros/micro-ros-agent:humble \
   udp4 --port 8090 -v4
+```
+
+Agent 必须在树莓派 NTP 同步后启动。容器创建后，在树莓派宿主机的仓库根目录执行：
+
+```bash
+./ros2_ws/src/alohamini_bringup/scripts/start_microros_agent_after_time_sync
 ```
 
 ## 话题检查
@@ -62,4 +71,3 @@ ros2 topic hz /imu
 ```text
 docs/FIRMWARE_FLASHING.md
 ```
-

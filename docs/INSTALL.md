@@ -91,7 +91,7 @@ micro-ROS Agent 负责把开发板发布的雷达和 IMU 接入 ROS2 网络。
 ```bash
 docker rm -f microros_agent 2>/dev/null || true
 
-docker run -d --restart=unless-stopped \
+docker create --restart=no \
   --platform linux/arm64/v8 \
   --net=host \
   --privileged \
@@ -103,13 +103,18 @@ docker run -d --restart=unless-stopped \
   udp4 --port 8090 -v4
 ```
 
-查看日志：
+容器创建后不要直接启动，先通过树莓派宿主机的时钟门禁，同时开启agent：
+
+```bash
+cd ~/alohamini_lidar_imu
+./ros2_ws/src/alohamini_bringup/scripts/start_microros_agent_after_time_sync
+```
+
+再查看日志：
 
 ```bash
 docker logs -f microros_agent
 ```
-
-看到 session、topic、datawriter 相关日志，说明开发板已经连上 Agent。
 
 ## 5. 创建 Nav2 / SLAM 运行容器
 
@@ -121,7 +126,7 @@ docker run -dit \
   --net=host \
   --ipc=host \
   --privileged \
-  --device="$(readlink -f /dev/am_camera_forward):/dev/am_camera_forward:rwm" \
+  -v /dev:/dev \
   -e ROS_DOMAIN_ID=5 \
   -e ROS_LOCALHOST_ONLY=0 \
   -e RMW_IMPLEMENTATION=rmw_fastrtps_cpp \

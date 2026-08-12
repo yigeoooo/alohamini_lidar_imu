@@ -21,6 +21,8 @@ install(
   PROGRAMS
     scripts/alohamini_mapping_session
     scripts/scan_sector_filter
+    scripts/wait_for_clock_sync
+    scripts/start_microros_agent_after_time_sync
   DESTINATION lib/${PROJECT_NAME}
 )
 

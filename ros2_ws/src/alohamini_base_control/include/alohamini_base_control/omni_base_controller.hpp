@@ -14,6 +14,7 @@
 #define ALOHAMINI_BASE_CONTROL__OMNI_BASE_CONTROLLER_HPP_
 
 #include <array>
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -25,7 +26,6 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/state.hpp"
 #include "realtime_tools/realtime_box.hpp"
-#include "realtime_tools/realtime_publisher.hpp"
 #include "tf2_msgs/msg/tf_message.hpp"
 
 namespace alohamini_base_control
@@ -74,6 +74,9 @@ private:
   std::array<double, 3> bodyToWheel(const BodyVelocity & v) const;
   // Inverse: wheel angular velocities (rad/s) -> body velocity.
   BodyVelocity wheelToBody(const std::array<double, 3> & wheel_radps) const;
+  // Runs on the controller-manager executor, outside update().  DDS publication
+  // therefore cannot stall the realtime control loop.
+  void publishOdometry();
 
   // Parameters.
   std::vector<std::string> wheel_names_;
@@ -89,6 +92,7 @@ private:
   std::string base_frame_ = "base_link";
   bool publish_tf_ = true;
   bool use_stamped_vel_ = false;
+  double odom_publish_rate_ = 25.0;
   double max_linear_speed_ = 0.0;   // 0 -> unlimited
   double max_lateral_speed_ = 0.0;
   double max_angular_speed_ = 0.0;
@@ -110,10 +114,22 @@ private:
   double odom_y_ = 0.0;
   double odom_yaw_ = 0.0;
 
-  std::shared_ptr<rclcpp::Publisher<nav_msgs::msg::Odometry>> odom_pub_;
-  std::shared_ptr<realtime_tools::RealtimePublisher<nav_msgs::msg::Odometry>> rt_odom_pub_;
-  std::shared_ptr<rclcpp::Publisher<tf2_msgs::msg::TFMessage>> tf_pub_;
-  std::shared_ptr<realtime_tools::RealtimePublisher<tf2_msgs::msg::TFMessage>> rt_tf_pub_;
+  // Lock-free snapshot from realtime update() to the non-realtime timer.  The
+  // sequence counter is a seqlock; every field is atomic so retrying is also
+  // data-race free under the C++ memory model.
+  std::atomic<std::uint64_t> odom_snapshot_seq_{0};
+  std::atomic<std::int64_t> odom_stamp_ns_{0};
+  std::atomic<double> published_x_{0.0};
+  std::atomic<double> published_y_{0.0};
+  std::atomic<double> published_yaw_{0.0};
+  std::atomic<double> published_vx_{0.0};
+  std::atomic<double> published_vy_{0.0};
+  std::atomic<double> published_wz_{0.0};
+  std::atomic<bool> active_{false};
+
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
+  rclcpp::Publisher<tf2_msgs::msg::TFMessage>::SharedPtr tf_pub_;
+  rclcpp::TimerBase::SharedPtr odom_publish_timer_;
 };
 
 }  // namespace alohamini_base_control

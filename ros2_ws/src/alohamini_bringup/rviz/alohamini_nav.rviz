@@ -46,19 +46,19 @@ Visualization Manager:
       Reference Frame: <Fixed Frame>
       Value: true
     - Class: rviz_default_plugins/TF
-      Enabled: true
-      Frame Timeout: 15
+      Enabled: false
+      Frame Timeout: 5
       Frames:
         All Enabled: true
       Marker Scale: 0.4
       Name: TF
-      Show Arrows: true
-      Show Axes: true
-      Show Names: true
+      Show Arrows: false
+      Show Axes: false
+      Show Names: false
       Tree:
         {}
-      Update Interval: 0
-      Value: true
+      Update Interval: 0.2
+      Value: false
     - Alpha: 1
       Class: rviz_default_plugins/RobotModel
       Collision Enabled: false
@@ -67,13 +67,13 @@ Visualization Manager:
         Value: /robot_description
       Enabled: true
       Name: RobotModel
-      Update Interval: 0
+      Update Interval: 0.2
       Value: true
       Visual Enabled: true
     - Class: rviz_default_plugins/Image
       Enabled: true
       Max Value: 1
-      Median window: 5
+      Median window: 1
       Min Value: 0
       Name: Head Camera
       Normalize Range: true
@@ -119,7 +119,7 @@ Visualization Manager:
       Size (m): 0.03
       Style: Points
       Topic:
-        Depth: 20
+        Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
@@ -127,18 +127,18 @@ Visualization Manager:
       Use Fixed Frame: true
       Value: true
     - Class: rviz_default_plugins/Marker
-      Enabled: true
+      Enabled: false
       Marker Topic:
-        Depth: 20
+        Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
-        Reliability Policy: Reliable
+        Reliability Policy: Best Effort
         Value: /scan_sector_marker
       Name: Scan Sector
       Namespaces:
         scan_sector_filter: true
-      Queue Size: 100
-      Value: true
+      Queue Size: 1
+      Value: false
     - Angle Tolerance: 0.1
       Class: rviz_default_plugins/Odometry
       Covariance:
@@ -156,8 +156,8 @@ Visualization Manager:
           Scale: 1
           Value: false
         Value: false
-      Enabled: true
-      Keep: 100
+      Enabled: false
+      Keep: 1
       Name: Odometry
       Position Tolerance: 0.1
       Shape:
@@ -171,12 +171,12 @@ Visualization Manager:
         Shaft Radius: 0.01
         Value: Arrow
       Topic:
-        Depth: 5
+        Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /odom
-      Value: true
+      Value: false
     - Class: rviz_default_plugins/Path
       Color: 25; 255; 0
       Enabled: true
@@ -228,7 +228,7 @@ Visualization Manager:
   Global Options:
     Background Color: 48; 48; 48
     Fixed Frame: map
-    Frame Rate: 30
+    Frame Rate: 20
   Name: root
   Tools:
     - Class: rviz_default_plugins/Interact

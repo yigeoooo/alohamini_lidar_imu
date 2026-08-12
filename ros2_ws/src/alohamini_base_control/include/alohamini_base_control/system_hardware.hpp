@@ -13,6 +13,7 @@
 #ifndef ALOHAMINI_BASE_CONTROL__SYSTEM_HARDWARE_HPP_
 #define ALOHAMINI_BASE_CONTROL__SYSTEM_HARDWARE_HPP_
 
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -71,6 +72,9 @@ private:
   bool setupMotors();
   // Command zero velocity on every wheel (used on deactivate / error).
   void stopBase();
+  bool recoverBus(const char * operation);
+  void recordBusSuccess(const char * operation);
+  void recordBusFailure(const char * operation);
 
   // Per-wheel config and live state, indexed in joint declaration order.
   std::vector<std::uint8_t> motor_ids_;
@@ -85,6 +89,14 @@ private:
   // Feetech STS firmware often does not support SYNC READ (0x82); default to reading
   // each motor's Present_Velocity with individual READ (0x02) so odometry works.
   bool use_sync_read_ = false;
+  int serial_timeout_ms_ = 20;
+  int reconnect_failure_threshold_ = 5;
+  int reconnect_backoff_ms_ = 500;
+  int consecutive_read_failures_ = 0;
+  int consecutive_write_failures_ = 0;
+  bool recovering_ = false;
+  std::chrono::steady_clock::time_point next_reconnect_attempt_{};
+  std::chrono::steady_clock::time_point hold_zero_until_{};
 
   FeetechBus bus_;
 };

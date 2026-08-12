@@ -36,6 +36,9 @@ def generate_launch_description():
     scan_topic = LaunchConfiguration("scan_topic")
     scan_min_angle = LaunchConfiguration("scan_min_angle")
     scan_max_angle = LaunchConfiguration("scan_max_angle")
+    scan_marker_publish_rate = LaunchConfiguration("scan_marker_publish_rate")
+    scan_max_age_sec = LaunchConfiguration("scan_max_age_sec")
+    scan_max_future_stamp_sec = LaunchConfiguration("scan_max_future_stamp_sec")
     enable_head_camera = LaunchConfiguration("enable_head_camera")
     head_camera_device = LaunchConfiguration("head_camera_device")
     head_camera_image_topic = LaunchConfiguration("head_camera_image_topic")
@@ -135,14 +138,17 @@ def generate_launch_description():
                 default_value="0.0",
                 description="Maximum scan angle to keep in radians; default keeps the physical front sector.",
             ),
-            DeclareLaunchArgument("enable_head_camera", default_value="true"),
+            DeclareLaunchArgument("scan_max_age_sec", default_value="0.5"),
+            DeclareLaunchArgument("scan_max_future_stamp_sec", default_value="0.2"),
+            DeclareLaunchArgument("scan_marker_publish_rate", default_value="1.0"),
+            DeclareLaunchArgument("enable_head_camera", default_value="false"),
             DeclareLaunchArgument("head_camera_device", default_value="/dev/am_camera_forward"),
             DeclareLaunchArgument("head_camera_image_topic", default_value="/head_camera/image_raw"),
             DeclareLaunchArgument("head_camera_frame_id", default_value="head_camera"),
-            DeclareLaunchArgument("head_camera_fps", default_value="20.0"),
+            DeclareLaunchArgument("head_camera_fps", default_value="10.0"),
             DeclareLaunchArgument("head_camera_width", default_value="640"),
             DeclareLaunchArgument("head_camera_height", default_value="480"),
-            DeclareLaunchArgument("head_camera_jpeg_quality", default_value="80"),
+            DeclareLaunchArgument("head_camera_jpeg_quality", default_value="70"),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(description_launch),
                 launch_arguments={
@@ -189,6 +195,9 @@ def generate_launch_description():
                         "output_topic": scan_topic,
                         "min_angle": scan_min_angle,
                         "max_angle": scan_max_angle,
+                        "max_scan_age_sec": scan_max_age_sec,
+                        "max_future_stamp_sec": scan_max_future_stamp_sec,
+                        "marker_publish_rate": scan_marker_publish_rate,
                     }
                 ],
             ),

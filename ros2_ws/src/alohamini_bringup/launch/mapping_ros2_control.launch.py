@@ -15,10 +15,18 @@
 # swaps the sensors layer for sensors_ros2_control.launch.py.
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    EmitEvent,
+    ExecuteProcess,
+    IncludeLaunchDescription,
+    RegisterEventHandler,
+)
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
-from launch_ros.substitutions import FindPackageShare
+from launch_ros.substitutions import FindPackagePrefix, FindPackageShare
 
 
 def generate_launch_description():
@@ -27,6 +35,15 @@ def generate_launch_description():
     use_mock_hardware = LaunchConfiguration("use_mock_hardware")
     base_yaw_deg = LaunchConfiguration("base_yaw_deg")
     slam_params_file = LaunchConfiguration("slam_params_file")
+    enable_head_camera = LaunchConfiguration("enable_head_camera")
+    head_camera_device = LaunchConfiguration("head_camera_device")
+    head_camera_image_topic = LaunchConfiguration("head_camera_image_topic")
+    head_camera_frame_id = LaunchConfiguration("head_camera_frame_id")
+    head_camera_fps = LaunchConfiguration("head_camera_fps")
+    head_camera_width = LaunchConfiguration("head_camera_width")
+    head_camera_height = LaunchConfiguration("head_camera_height")
+    head_camera_jpeg_quality = LaunchConfiguration("head_camera_jpeg_quality")
+    wait_for_time_sync = LaunchConfiguration("wait_for_time_sync")
 
     sensors_launch = PathJoinSubstitution(
         [FindPackageShare("alohamini_bringup"), "launch", "sensors_ros2_control.launch.py"]
@@ -37,6 +54,47 @@ def generate_launch_description():
     slam_launch = PathJoinSubstitution(
         [FindPackageShare("slam_toolbox"), "launch", "online_async_launch.py"]
     )
+
+    time_gate = ExecuteProcess(
+        cmd=[
+            PathJoinSubstitution(
+                [FindPackagePrefix("alohamini_bringup"), "lib", "alohamini_bringup", "wait_for_clock_sync"]
+            ),
+            "--enabled",
+            wait_for_time_sync,
+        ],
+        output="screen",
+    )
+    sensors = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(sensors_launch),
+        launch_arguments={
+            "serial_port": serial_port,
+            "baud_rate": baud_rate,
+            "use_mock_hardware": use_mock_hardware,
+            "base_yaw_deg": base_yaw_deg,
+            "enable_head_camera": enable_head_camera,
+            "head_camera_device": head_camera_device,
+            "head_camera_image_topic": head_camera_image_topic,
+            "head_camera_frame_id": head_camera_frame_id,
+            "head_camera_fps": head_camera_fps,
+            "head_camera_width": head_camera_width,
+            "head_camera_height": head_camera_height,
+            "head_camera_jpeg_quality": head_camera_jpeg_quality,
+        }.items(),
+    )
+    slam = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(slam_launch),
+        launch_arguments={
+            "use_sim_time": "false",
+            "slam_params_file": slam_params_file,
+        }.items(),
+    )
+
+    def start_after_clock_gate(event, _context):
+        if event.returncode == 0:
+            return [sensors, slam]
+        reason = f"Clock synchronization gate failed with exit code {event.returncode}"
+        return [EmitEvent(event=Shutdown(reason=reason))]
 
     return LaunchDescription(
         [
@@ -49,21 +107,26 @@ def generate_launch_description():
             DeclareLaunchArgument("use_mock_hardware", default_value="false"),
             DeclareLaunchArgument("base_yaw_deg", default_value="90.0"),
             DeclareLaunchArgument("slam_params_file", default_value=default_slam_params),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(sensors_launch),
-                launch_arguments={
-                    "serial_port": serial_port,
-                    "baud_rate": baud_rate,
-                    "use_mock_hardware": use_mock_hardware,
-                    "base_yaw_deg": base_yaw_deg,
-                }.items(),
+            DeclareLaunchArgument(
+                "enable_head_camera",
+                default_value="false",
+                description="Publish the head camera stream (disabled by default to reduce DDS/Wi-Fi load).",
             ),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(slam_launch),
-                launch_arguments={
-                    "use_sim_time": "false",
-                    "slam_params_file": slam_params_file,
-                }.items(),
+            DeclareLaunchArgument("head_camera_device", default_value="/dev/am_camera_forward"),
+            DeclareLaunchArgument("head_camera_image_topic", default_value="/head_camera/image_raw"),
+            DeclareLaunchArgument("head_camera_frame_id", default_value="head_camera"),
+            DeclareLaunchArgument("head_camera_fps", default_value="10.0"),
+            DeclareLaunchArgument("head_camera_width", default_value="640"),
+            DeclareLaunchArgument("head_camera_height", default_value="480"),
+            DeclareLaunchArgument("head_camera_jpeg_quality", default_value="70"),
+            DeclareLaunchArgument(
+                "wait_for_time_sync",
+                default_value="true",
+                description="Wait for the Pi kernel clock to report NTP synchronization before ROS nodes start.",
+            ),
+            time_gate,
+            RegisterEventHandler(
+                OnProcessExit(target_action=time_gate, on_exit=start_after_clock_gate)
             ),
         ]
     )

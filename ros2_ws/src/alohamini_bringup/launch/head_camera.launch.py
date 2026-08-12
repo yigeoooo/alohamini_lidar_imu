@@ -8,6 +8,7 @@ def generate_launch_description():
     device = LaunchConfiguration("device")
     image_topic = LaunchConfiguration("image_topic")
     frame_id = LaunchConfiguration("frame_id")
+    pixel_format = LaunchConfiguration("pixel_format")
     fps = LaunchConfiguration("fps")
     width = LaunchConfiguration("width")
     height = LaunchConfiguration("height")
@@ -18,10 +19,11 @@ def generate_launch_description():
             DeclareLaunchArgument("device", default_value="/dev/am_camera_forward"),
             DeclareLaunchArgument("image_topic", default_value="/head_camera/image_raw"),
             DeclareLaunchArgument("frame_id", default_value="head_camera"),
-            DeclareLaunchArgument("fps", default_value="20.0"),
+            DeclareLaunchArgument("pixel_format", default_value="MJPG"),
+            DeclareLaunchArgument("fps", default_value="10.0"),
             DeclareLaunchArgument("width", default_value="640"),
             DeclareLaunchArgument("height", default_value="480"),
-            DeclareLaunchArgument("jpeg_quality", default_value="80"),
+            DeclareLaunchArgument("jpeg_quality", default_value="70"),
             Node(
                 package="alohamini_bringup",
                 executable="head_camera_publisher",
@@ -32,6 +34,7 @@ def generate_launch_description():
                         "device": device,
                         "image_topic": image_topic,
                         "frame_id": frame_id,
+                        "pixel_format": pixel_format,
                         "fps": fps,
                         "width": width,
                         "height": height,

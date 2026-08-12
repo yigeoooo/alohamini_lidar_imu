@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+agent_container=${MICROROS_AGENT_CONTAINER:-microros_agent}
+
+"${script_dir}/wait_for_clock_sync"
+docker start "${agent_container}"
+echo "Started ${agent_container} after the host clock synchronized."

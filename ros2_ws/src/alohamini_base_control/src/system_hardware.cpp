@@ -50,6 +50,11 @@ hardware_interface::CallbackReturn AlohaMiniBaseHardware::on_init(
   max_wheel_raw_ = std::stoi(get_param("max_wheel_raw", "3000"));
   configure_motors_ = get_param("configure_motors", "true") == "true";
   use_sync_read_ = get_param("use_sync_read", "false") == "true";
+  serial_timeout_ms_ = std::max(1, std::stoi(get_param("serial_timeout_ms", "20")));
+  reconnect_failure_threshold_ =
+    std::max(1, std::stoi(get_param("reconnect_failure_threshold", "5")));
+  reconnect_backoff_ms_ = std::max(50, std::stoi(get_param("reconnect_backoff_ms", "500")));
+  bus_.setTimeoutMs(serial_timeout_ms_);
 
   const std::size_t n = info_.joints.size();
   motor_ids_.assign(n, 0);
@@ -146,6 +151,78 @@ bool AlohaMiniBaseHardware::setupMotors()
   return ok;
 }
 
+void AlohaMiniBaseHardware::recordBusSuccess(const char * operation)
+{
+  if (std::string(operation) == "velocity read") {
+    consecutive_read_failures_ = 0;
+  } else {
+    consecutive_write_failures_ = 0;
+  }
+}
+
+void AlohaMiniBaseHardware::recordBusFailure(const char * operation)
+{
+  int & failures = std::string(operation) == "velocity read" ?
+    consecutive_read_failures_ : consecutive_write_failures_;
+  ++failures;
+  if (failures == 1 || failures % reconnect_failure_threshold_ == 0)
+  {
+    RCLCPP_WARN(
+      logger(), "%s failed (%d consecutive): %s", operation, failures,
+      bus_.lastError().c_str());
+  }
+  if (failures >= reconnect_failure_threshold_) {
+    // Best effort only: a final broadcast zero may still get through even when
+    // reads or earlier writes are failing.  Never let its result delay close
+    // and recovery, since writeAll() is already bounded by a total timeout.
+    if (bus_.isOpen()) {
+      stopBase();
+    }
+    recovering_ = true;
+    // stopBase() overwrites the diagnostic string; close/recovery is still
+    // unconditional regardless of whether that last zero broadcast succeeded.
+    bus_.close();
+    next_reconnect_attempt_ = std::chrono::steady_clock::now() +
+      std::chrono::milliseconds(reconnect_backoff_ms_);
+    std::fill(hw_commands_vel_.begin(), hw_commands_vel_.end(), 0.0);
+    std::fill(hw_states_vel_.begin(), hw_states_vel_.end(), 0.0);
+  }
+}
+
+bool AlohaMiniBaseHardware::recoverBus(const char * operation)
+{
+  if (!recovering_) {
+    return bus_.isOpen();
+  }
+  std::fill(hw_commands_vel_.begin(), hw_commands_vel_.end(), 0.0);
+  std::fill(hw_states_vel_.begin(), hw_states_vel_.end(), 0.0);
+  if (std::chrono::steady_clock::now() < next_reconnect_attempt_) {
+    return false;
+  }
+
+  next_reconnect_attempt_ = std::chrono::steady_clock::now() +
+    std::chrono::milliseconds(reconnect_backoff_ms_);
+  if (!bus_.open(serial_port_, baud_rate_)) {
+    RCLCPP_WARN(logger(), "Serial reconnect during %s failed: %s", operation, bus_.lastError().c_str());
+    return false;
+  }
+  bus_.setTimeoutMs(serial_timeout_ms_);
+  if (!setupMotors()) {
+    RCLCPP_WARN(logger(), "Serial reopened but motor reconfiguration failed; retrying safely.");
+    bus_.close();
+    return false;
+  }
+  stopBase();
+  hold_zero_until_ = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  std::fill(hw_commands_vel_.begin(), hw_commands_vel_.end(), 0.0);
+  std::fill(hw_states_vel_.begin(), hw_states_vel_.end(), 0.0);
+  recovering_ = false;
+  consecutive_read_failures_ = 0;
+  consecutive_write_failures_ = 0;
+  RCLCPP_INFO(logger(), "Serial bus recovered; motors reconfigured and held at zero velocity.");
+  return true;
+}
+
 void AlohaMiniBaseHardware::stopBase()
 {
   std::vector<std::pair<std::uint8_t, std::int16_t>> zero;
@@ -167,6 +244,9 @@ hardware_interface::CallbackReturn AlohaMiniBaseHardware::on_activate(
     RCLCPP_WARN(logger(), "Some motor setup writes failed; continuing.");
   }
   std::fill(hw_commands_vel_.begin(), hw_commands_vel_.end(), 0.0);
+  recovering_ = false;
+  consecutive_read_failures_ = 0;
+  consecutive_write_failures_ = 0;
   stopBase();
   RCLCPP_INFO(logger(), "AlohaMiniBaseHardware activated.");
   return hardware_interface::CallbackReturn::SUCCESS;
@@ -214,15 +294,19 @@ AlohaMiniBaseHardware::export_command_interfaces()
 hardware_interface::return_type AlohaMiniBaseHardware::read(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & period)
 {
+  if (!recoverBus("read")) {
+    return hardware_interface::return_type::OK;
+  }
   std::vector<std::int16_t> raw;
   const bool ok = use_sync_read_
     ? bus_.syncReadPresentVelocity(motor_ids_, raw)
     : bus_.readPresentVelocityIndividually(motor_ids_, raw);
   if (!ok) {
-    // Keep last good values rather than spiking; surface the issue but stay alive.
-    RCLCPP_DEBUG(logger(), "velocity read failed: %s", bus_.lastError().c_str());
+    recordBusFailure("velocity read");
+    std::fill(hw_states_vel_.begin(), hw_states_vel_.end(), 0.0);
     return hardware_interface::return_type::OK;
   }
+  recordBusSuccess("velocity read");
 
   const double dt = period.seconds();
   for (std::size_t i = 0; i < motor_ids_.size(); ++i) {
@@ -239,12 +323,16 @@ hardware_interface::return_type AlohaMiniBaseHardware::read(
 hardware_interface::return_type AlohaMiniBaseHardware::write(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
+  if (!recoverBus("write")) {
+    return hardware_interface::return_type::OK;
+  }
+  const bool hold_zero = std::chrono::steady_clock::now() < hold_zero_until_;
   // rad/s -> deg/s -> raw tick. Proportional scaling so no single wheel exceeds
   // max_wheel_raw_, mirroring lekiwi.py `_body_to_wheel_raw`.
   std::vector<double> degps(motor_ids_.size());
   double max_raw_computed = 0.0;
   for (std::size_t i = 0; i < motor_ids_.size(); ++i) {
-    degps[i] = hw_commands_vel_[i] * kRadToDeg;
+    degps[i] = (hold_zero ? 0.0 : hw_commands_vel_[i]) * kRadToDeg;
     max_raw_computed = std::max(max_raw_computed, std::abs(degps[i]) * kStepsPerDeg);
   }
   double scale = 1.0;
@@ -257,7 +345,11 @@ hardware_interface::return_type AlohaMiniBaseHardware::write(
   for (std::size_t i = 0; i < motor_ids_.size(); ++i) {
     id_raw.emplace_back(motor_ids_[i], degpsToRaw(degps[i] * scale));
   }
-  bus_.syncWriteGoalVelocity(id_raw);
+  if (!bus_.syncWriteGoalVelocity(id_raw)) {
+    recordBusFailure("velocity write");
+  } else {
+    recordBusSuccess("velocity write");
+  }
   return hardware_interface::return_type::OK;
 }
 

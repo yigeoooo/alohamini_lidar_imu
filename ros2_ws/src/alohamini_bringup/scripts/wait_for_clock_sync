@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Block startup until Linux reports a synchronized, sane wall clock."""
+
+import argparse
+import ctypes
+import time
+
+
+STA_UNSYNC = 0x0040
+MINIMUM_SANE_EPOCH = 1_700_000_000
+
+
+class Timex(ctypes.Structure):
+    _fields_ = [
+        ("modes", ctypes.c_uint),
+        ("offset", ctypes.c_long),
+        ("freq", ctypes.c_long),
+        ("maxerror", ctypes.c_long),
+        ("esterror", ctypes.c_long),
+        ("status", ctypes.c_int),
+        ("constant", ctypes.c_long),
+        ("precision", ctypes.c_long),
+        ("tolerance", ctypes.c_long),
+        ("time_sec", ctypes.c_long),
+        ("time_usec", ctypes.c_long),
+        ("tick", ctypes.c_long),
+        ("ppsfreq", ctypes.c_long),
+        ("jitter", ctypes.c_long),
+        ("shift", ctypes.c_int),
+        ("stabil", ctypes.c_long),
+        ("jitcnt", ctypes.c_long),
+        ("calcnt", ctypes.c_long),
+        ("errcnt", ctypes.c_long),
+        ("stbcnt", ctypes.c_long),
+        ("tai", ctypes.c_int),
+        ("padding", ctypes.c_int * 11),
+    ]
+
+
+LIBC = ctypes.CDLL(None, use_errno=True)
+ADJTIMEX = getattr(LIBC, "adjtimex", None)
+if ADJTIMEX is not None:
+    ADJTIMEX.argtypes = [ctypes.POINTER(Timex)]
+    ADJTIMEX.restype = ctypes.c_int
+
+
+def kernel_clock_is_synchronized():
+    if ADJTIMEX is None:
+        return False, "libc has no adjtimex()"
+    value = Timex()
+    result = ADJTIMEX(ctypes.byref(value))
+    if result < 0:
+        return False, f"adjtimex failed with errno {ctypes.get_errno()}"
+    if time.time() < MINIMUM_SANE_EPOCH:
+        return False, "wall clock epoch is not sane"
+    if value.status & STA_UNSYNC:
+        return False, "kernel STA_UNSYNC is set"
+    return True, "kernel clock is synchronized"
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--enabled", default="true")
+    parser.add_argument("--stable-sec", type=float, default=2.0)
+    parser.add_argument("--poll-sec", type=float, default=0.5)
+    args = parser.parse_args()
+    if args.enabled.lower() not in ("1", "true", "yes", "on"):
+        print("Clock synchronization gate disabled.", flush=True)
+        return
+
+    stable_since = None
+    last_reason = ""
+    while True:
+        synchronized, reason = kernel_clock_is_synchronized()
+        now = time.monotonic()
+        if synchronized:
+            stable_since = stable_since or now
+            if now - stable_since >= max(0.0, args.stable_sec):
+                print(f"Clock gate passed: {reason}.", flush=True)
+                return
+        else:
+            stable_since = None
+            if reason != last_reason:
+                print(f"Waiting for NTP synchronization: {reason}.", flush=True)
+                last_reason = reason
+        time.sleep(max(0.1, args.poll_sec))
+
+
+if __name__ == "__main__":
+    main()

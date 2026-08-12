@@ -17,6 +17,12 @@ def generate_launch_description():
     angular_z_scale = LaunchConfiguration("angular_z_scale")
     swap_xy = LaunchConfiguration("swap_xy")
     require_observation_for_motion = LaunchConfiguration("require_observation_for_motion")
+    enable_head_camera = LaunchConfiguration("enable_head_camera")
+    head_camera_device = LaunchConfiguration("head_camera_device")
+    head_camera_fps = LaunchConfiguration("head_camera_fps")
+    head_camera_width = LaunchConfiguration("head_camera_width")
+    head_camera_height = LaunchConfiguration("head_camera_height")
+    head_camera_jpeg_quality = LaunchConfiguration("head_camera_jpeg_quality")
 
     sensors_bridge_launch = PathJoinSubstitution(
         [FindPackageShare("alohamini_bringup"), "launch", "sensors_bridge.launch.py"]
@@ -41,6 +47,12 @@ def generate_launch_description():
             DeclareLaunchArgument("angular_z_scale", default_value="1.0"),
             DeclareLaunchArgument("swap_xy", default_value="false"),
             DeclareLaunchArgument("require_observation_for_motion", default_value="true"),
+            DeclareLaunchArgument("enable_head_camera", default_value="false"),
+            DeclareLaunchArgument("head_camera_device", default_value="/dev/am_camera_forward"),
+            DeclareLaunchArgument("head_camera_fps", default_value="10.0"),
+            DeclareLaunchArgument("head_camera_width", default_value="640"),
+            DeclareLaunchArgument("head_camera_height", default_value="480"),
+            DeclareLaunchArgument("head_camera_jpeg_quality", default_value="70"),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(sensors_bridge_launch),
                 launch_arguments={
@@ -53,6 +65,12 @@ def generate_launch_description():
                     "angular_z_scale": angular_z_scale,
                     "swap_xy": swap_xy,
                     "require_observation_for_motion": require_observation_for_motion,
+                    "enable_head_camera": enable_head_camera,
+                    "head_camera_device": head_camera_device,
+                    "head_camera_fps": head_camera_fps,
+                    "head_camera_width": head_camera_width,
+                    "head_camera_height": head_camera_height,
+                    "head_camera_jpeg_quality": head_camera_jpeg_quality,
                 }.items(),
             ),
             IncludeLaunchDescription(

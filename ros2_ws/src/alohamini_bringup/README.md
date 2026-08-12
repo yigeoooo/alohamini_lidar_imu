@@ -25,15 +25,22 @@ source ~/alohamini_lidar_imu/ros2_ws/install/setup.bash
 ```bash
 ros2 run alohamini_bringup alohamini_mapping_session \
     --serial-port /dev/ttyACM0 \
-    --map ~/my_map
+    --map ~/my_map \
+    --enable-head-camera
 ```
+
+如需关闭摄像头，不传 `--enable-head-camera`。
 
 也可以直接启动 launch，再另开终端保存地图：
 
 ```bash
-ros2 launch alohamini_bringup mapping_ros2_control.launch.py serial_port:=/dev/ttyACM0
+ros2 launch alohamini_bringup mapping_ros2_control.launch.py \
+    serial_port:=/dev/ttyACM0 \
+    enable_head_camera:=true
 ros2 run nav2_map_server map_saver_cli -f ~/my_map
 ```
+
+如需关闭摄像头，将参数改为 `enable_head_camera:=false`。
 
 旧 ZMQ bridge 仍可用：`ros2 run alohamini_bringup alohamini_mapping_session --driver zmq --host 127.0.0.1 --map ~/my_map`。
 
@@ -42,8 +49,11 @@ ros2 run nav2_map_server map_saver_cli -f ~/my_map
 ```bash
 ros2 launch alohamini_bringup navigation_ros2_control.launch.py \
     serial_port:=/dev/ttyACM0 \
-    map:=~/my_map.yaml
+    map:=~/my_map.yaml \
+    enable_head_camera:=true
 ```
+
+如需关闭摄像头，将参数改为 `enable_head_camera:=false`。
 
 ### 常用参数
 
@@ -69,6 +79,11 @@ ros2_control 的 `joint_state_broadcaster` 只发布**三个轮子**关节的状
 
 这样 `/joint_states` 含全部 16 个关节，TF 树完整。（已在 mock 模式验证：16 关节、
 `base_link→laser_frame` 与 `odom→base_footprint` TF 均可解析。）
+
+`/scan_filtered` 只会重新打戳“仍然新鲜”的 `/scan`。默认丢弃超过 0.5 秒、来自未来
+超过 0.2 秒以及时间戳回退/重复的数据，避免把 XRCE/DDS 队列中的陈旧扫描伪装成当前
+障碍；参数为 `max_scan_age_sec`、`max_future_stamp_sec`、`drop_out_of_order`。过滤器会
+节流报告累计丢包数，发现警告时应检查 Pi NTP 和 micro-ROS Agent/ESP32。
 
 ## 实物注意事项
 

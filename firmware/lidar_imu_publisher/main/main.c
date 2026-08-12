@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 
 #include <micro_ros_utilities/string_utilities.h>
+#include <rcl/context.h>
 #include <rcl/error_handling.h>
 #include <rcl/rcl.h>
 #include <rclc/executor.h>
@@ -25,25 +26,6 @@
 #include "lidar_ms200.h"
 #include "ms200.h"
 #include "uart1.h"
-
-#define RCCHECK(fn)                                                                      \
-    {                                                                                    \
-        rcl_ret_t temp_rc = fn;                                                          \
-        if ((temp_rc != RCL_RET_OK))                                                     \
-        {                                                                                \
-            printf("Failed status on line %d: %d. Aborting.\n", __LINE__, (int)temp_rc); \
-            vTaskDelete(NULL);                                                           \
-        }                                                                                \
-    }
-
-#define RCSOFTCHECK(fn)                                                                    \
-    {                                                                                      \
-        rcl_ret_t temp_rc = fn;                                                            \
-        if ((temp_rc != RCL_RET_OK))                                                       \
-        {                                                                                  \
-            printf("Failed status on line %d: %d. Continuing.\n", __LINE__, (int)temp_rc); \
-        }                                                                                  \
-    }
 
 #define ROS_NAMESPACE CONFIG_MICRO_ROS_NAMESPACE
 #define ROS_DOMAIN_ID CONFIG_MICRO_ROS_DOMAIN_ID
@@ -64,6 +46,10 @@
 #define TIME_SYNC_RETRY_TIMEOUT_MS 100
 #define TIME_SYNC_RETRY_INTERVAL_MS 5000
 #define TIME_SYNC_REFRESH_INTERVAL_MS 60000
+#define AGENT_PING_INTERVAL_MS 2000
+#define AGENT_PING_TIMEOUT_MS 100
+#define AGENT_FAILURE_THRESHOLD 3
+#define AGENT_RECONNECT_DELAY_MS 1000
 
 static const char *TAG = "LIDAR_IMU";
 
@@ -76,9 +62,15 @@ static rcl_timer_t timer_imu;
 static SemaphoreHandle_t lidar_msg_mutex;
 static SemaphoreHandle_t imu_msg_mutex;
 
-static unsigned long long time_offset = 0;
+static int64_t time_offset_ms = 0;
+static unsigned long long last_timestamp_ms = 0;
 static unsigned long last_time_sync_attempt_ms = 0;
+static unsigned long last_agent_ping_ms = 0;
 static int time_synchronized = 0;
+static int consecutive_lidar_failures = 0;
+static int consecutive_imu_failures = 0;
+static int consecutive_ping_failures = 0;
+static volatile int reconnect_requested = 0;
 
 static void set_frame_id(rosidl_runtime_c__String *field, const char *content_frame_id)
 {
@@ -218,13 +210,21 @@ static unsigned long get_millisecond(void)
 
 static void sync_time(uint32_t timeout_ms)
 {
-    unsigned long now = get_millisecond();
-    last_time_sync_attempt_ms = now;
+    unsigned long attempt_started_ms = get_millisecond();
+    last_time_sync_attempt_ms = attempt_started_ms;
     rcl_ret_t rc = rmw_uros_sync_session(timeout_ms);
     if (rc == RCL_RET_OK)
     {
-        unsigned long long ros_time_ms = rmw_uros_epoch_millis();
-        time_offset = ros_time_ms - now;
+        unsigned long now = get_millisecond();
+        int64_t ros_time_ms = (int64_t)rmw_uros_epoch_millis();
+        int64_t new_offset_ms = ros_time_ms - (int64_t)now;
+        int64_t candidate_time_ms = (int64_t)now + new_offset_ms;
+        if (candidate_time_ms < last_timestamp_ms)
+        {
+            new_offset_ms += (int64_t)last_timestamp_ms - candidate_time_ms;
+            ESP_LOGW(TAG, "Clock sync would move backwards; clamping to last published stamp");
+        }
+        time_offset_ms = new_offset_ms;
         time_synchronized = 1;
         ESP_LOGI(TAG, "micro-ROS time synchronized");
     }
@@ -234,8 +234,7 @@ static void sync_time(uint32_t timeout_ms)
     }
     else
     {
-        time_offset = 0;
-        ESP_LOGW(TAG, "micro-ROS time sync failed (%d), using boot-relative timestamps", (int)rc);
+        ESP_LOGW(TAG, "micro-ROS time sync failed (%d), waiting without publishing", (int)rc);
     }
 }
 
@@ -252,7 +251,13 @@ static void maybe_sync_time(void)
 static struct timespec get_timespec(void)
 {
     struct timespec tp = {0};
-    unsigned long long now = get_millisecond() + time_offset;
+    int64_t candidate_ms = (int64_t)get_millisecond() + time_offset_ms;
+    unsigned long long now = candidate_ms > 0 ? (unsigned long long)candidate_ms : 0;
+    if (now <= last_timestamp_ms)
+    {
+        now = last_timestamp_ms + 1;
+    }
+    last_timestamp_ms = now;
     tp.tv_sec = now / 1000;
     tp.tv_nsec = (now % 1000) * 1000000;
     return tp;
@@ -290,11 +295,26 @@ static void timer_lidar_callback(rcl_timer_t *timer, int64_t last_call_time)
     RCLC_UNUSED(last_call_time);
     if (timer != NULL)
     {
+        if (!time_synchronized)
+            return;
         struct timespec time_stamp = get_timespec();
         copy_lidar_msg_for_publish(&publish_msg, publish_ranges);
         publish_msg.header.stamp.sec = time_stamp.tv_sec;
         publish_msg.header.stamp.nanosec = time_stamp.tv_nsec;
-        RCSOFTCHECK(rcl_publish(&publisher_lidar, &publish_msg, NULL));
+        rcl_ret_t rc = rcl_publish(&publisher_lidar, &publish_msg, NULL);
+        if (rc != RCL_RET_OK)
+        {
+            consecutive_lidar_failures++;
+            ESP_LOGW(TAG, "scan publish failed: %d (%d consecutive)", (int)rc, consecutive_lidar_failures);
+            if (consecutive_lidar_failures >= AGENT_FAILURE_THRESHOLD)
+            {
+                reconnect_requested = 1;
+            }
+        }
+        else
+        {
+            consecutive_lidar_failures = 0;
+        }
         if ((++publish_count % 100) == 0)
         {
             ESP_LOGI(TAG, "published scan samples: %lu", (unsigned long)publish_count);
@@ -310,11 +330,26 @@ static void timer_imu_callback(rcl_timer_t *timer, int64_t last_call_time)
     RCLC_UNUSED(last_call_time);
     if (timer != NULL)
     {
+        if (!time_synchronized)
+            return;
         struct timespec time_stamp = get_timespec();
         copy_imu_msg_for_publish(&publish_msg);
         publish_msg.header.stamp.sec = time_stamp.tv_sec;
         publish_msg.header.stamp.nanosec = time_stamp.tv_nsec;
-        RCSOFTCHECK(rcl_publish(&publisher_imu, &publish_msg, NULL));
+        rcl_ret_t rc = rcl_publish(&publisher_imu, &publish_msg, NULL);
+        if (rc != RCL_RET_OK)
+        {
+            consecutive_imu_failures++;
+            ESP_LOGW(TAG, "imu publish failed: %d (%d consecutive)", (int)rc, consecutive_imu_failures);
+            if (consecutive_imu_failures >= AGENT_FAILURE_THRESHOLD)
+            {
+                reconnect_requested = 1;
+            }
+        }
+        else
+        {
+            consecutive_imu_failures = 0;
+        }
         if ((++publish_count % 100) == 0)
         {
             ESP_LOGI(TAG, "published imu samples: %lu", (unsigned long)publish_count);
@@ -322,77 +357,162 @@ static void timer_imu_callback(rcl_timer_t *timer, int64_t last_call_time)
     }
 }
 
+static void reset_session_state(void)
+{
+    time_synchronized = 0;
+    last_time_sync_attempt_ms = 0;
+    last_agent_ping_ms = 0;
+    consecutive_lidar_failures = 0;
+    consecutive_imu_failures = 0;
+    consecutive_ping_failures = 0;
+    reconnect_requested = 0;
+}
+
 static void micro_ros_task(void *arg)
 {
     rcl_allocator_t allocator = rcl_get_default_allocator();
-    rclc_support_t support;
-
-    rcl_init_options_t init_options = rcl_get_zero_initialized_init_options();
-    RCCHECK(rcl_init_options_init(&init_options, allocator));
-    RCCHECK(rcl_init_options_set_domain_id(&init_options, ROS_DOMAIN_ID));
-
-    rmw_init_options_t *rmw_options = rcl_init_options_get_rmw_init_options(&init_options);
-    RCCHECK(rmw_uros_options_set_udp_address(ROS_AGENT_IP, ROS_AGENT_PORT, rmw_options));
-
-    int state_agent = 0;
     while (1)
     {
+        rclc_support_t support;
+        memset(&support, 0, sizeof(support));
+        support.context = rcl_get_zero_initialized_context();
+        support.clock.type = RCL_CLOCK_UNINITIALIZED;
+        rcl_node_t node = rcl_get_zero_initialized_node();
+        rclc_executor_t executor = rclc_executor_get_zero_initialized_executor();
+        publisher_lidar = rcl_get_zero_initialized_publisher();
+        publisher_imu = rcl_get_zero_initialized_publisher();
+        timer_lidar = rcl_get_zero_initialized_timer();
+        timer_imu = rcl_get_zero_initialized_timer();
+        rcl_init_options_t init_options = rcl_get_zero_initialized_init_options();
+        int support_ready = 0;
+        int node_ready = 0;
+        int lidar_publisher_ready = 0;
+        int imu_publisher_ready = 0;
+        int lidar_timer_ready = 0;
+        int imu_timer_ready = 0;
+        int executor_ready = 0;
+        int init_options_ready = 0;
+        rcl_ret_t rc = RCL_RET_ERROR;
+
+        rc = rcl_init_options_init(&init_options, allocator);
+        if (rc != RCL_RET_OK)
+            goto session_cleanup;
+        init_options_ready = 1;
+        rc = rcl_init_options_set_domain_id(&init_options, ROS_DOMAIN_ID);
+        if (rc != RCL_RET_OK)
+            goto session_cleanup;
+        rmw_init_options_t *rmw_options = rcl_init_options_get_rmw_init_options(&init_options);
+        rc = rmw_uros_options_set_udp_address(ROS_AGENT_IP, ROS_AGENT_PORT, rmw_options);
+        if (rc != RCL_RET_OK)
+            goto session_cleanup;
+
         ESP_LOGI(TAG, "Connecting agent: %s:%s", ROS_AGENT_IP, ROS_AGENT_PORT);
-        state_agent = rclc_support_init_with_options(&support, 0, NULL, &init_options, &allocator);
-        if (state_agent == ESP_OK)
+        rc = rclc_support_init_with_options(&support, 0, NULL, &init_options, &allocator);
+        if (rc != RCL_RET_OK)
+            goto session_cleanup;
+        support_ready = 1;
+
+        rc = rclc_node_init_default(&node, "lidar_imu_publisher", ROS_NAMESPACE, &support);
+        if (rc != RCL_RET_OK)
+            goto session_cleanup;
+        node_ready = 1;
+        rc = rclc_publisher_init_default(&publisher_lidar, &node,
+                                         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, LaserScan), "scan");
+        if (rc != RCL_RET_OK)
+            goto session_cleanup;
+        lidar_publisher_ready = 1;
+        rmw_publisher_t *lidar_rmw_publisher = rcl_publisher_get_rmw_handle(&publisher_lidar);
+        if (lidar_rmw_publisher == NULL ||
+            rmw_uros_set_publisher_session_timeout(lidar_rmw_publisher, 100) != RMW_RET_OK)
         {
-            ESP_LOGI(TAG, "Connected agent: %s:%s", ROS_AGENT_IP, ROS_AGENT_PORT);
-            break;
+            rc = RCL_RET_ERROR;
+            goto session_cleanup;
         }
-        vTaskDelay(pdMS_TO_TICKS(500));
+        rc = rclc_publisher_init_default(&publisher_imu, &node,
+                                         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu), "imu");
+        if (rc != RCL_RET_OK)
+            goto session_cleanup;
+        imu_publisher_ready = 1;
+        rmw_publisher_t *imu_rmw_publisher = rcl_publisher_get_rmw_handle(&publisher_imu);
+        if (imu_rmw_publisher == NULL ||
+            rmw_uros_set_publisher_session_timeout(imu_rmw_publisher, 100) != RMW_RET_OK)
+        {
+            rc = RCL_RET_ERROR;
+            goto session_cleanup;
+        }
+        rc = rclc_timer_init_default(&timer_lidar, &support,
+                                     RCL_MS_TO_NS(LIDAR_PUBLISH_PERIOD_MS), timer_lidar_callback);
+        if (rc != RCL_RET_OK)
+            goto session_cleanup;
+        lidar_timer_ready = 1;
+        rc = rclc_timer_init_default(&timer_imu, &support, RCL_MS_TO_NS(50), timer_imu_callback);
+        if (rc != RCL_RET_OK)
+            goto session_cleanup;
+        imu_timer_ready = 1;
+        rc = rclc_executor_init(&executor, &support.context, 2, &allocator);
+        if (rc != RCL_RET_OK)
+            goto session_cleanup;
+        executor_ready = 1;
+        if (rclc_executor_add_timer(&executor, &timer_lidar) != RCL_RET_OK ||
+            rclc_executor_add_timer(&executor, &timer_imu) != RCL_RET_OK)
+            goto session_cleanup;
+
+        reset_session_state();
+        sync_time(TIME_SYNC_INITIAL_TIMEOUT_MS);
+        ESP_LOGI(TAG, "Agent session is ready");
+
+        while (!reconnect_requested)
+        {
+            rc = rclc_executor_spin_some(&executor, RCL_MS_TO_NS(EXECUTOR_SPIN_TIMEOUT_MS));
+            if (rc != RCL_RET_OK && rc != RCL_RET_TIMEOUT)
+            {
+                ESP_LOGW(TAG, "executor spin failed: %d", (int)rc);
+                reconnect_requested = 1;
+                break;
+            }
+            maybe_sync_time();
+            unsigned long now_ms = get_millisecond();
+            if ((now_ms - last_agent_ping_ms) >= AGENT_PING_INTERVAL_MS)
+            {
+                last_agent_ping_ms = now_ms;
+                if (rmw_uros_ping_agent(AGENT_PING_TIMEOUT_MS, 1) != RMW_RET_OK)
+                {
+                    consecutive_ping_failures++;
+                    if (consecutive_ping_failures >= AGENT_FAILURE_THRESHOLD)
+                        reconnect_requested = 1;
+                }
+                else
+                {
+                    consecutive_ping_failures = 0;
+                }
+            }
+            usleep(1000);
+        }
+
+    session_cleanup:
+        ESP_LOGW(TAG, "Tearing down micro-ROS entities and reconnecting (rc=%d)", (int)rc);
+        if (support_ready)
+            rmw_uros_set_context_entity_destroy_session_timeout(
+                rcl_context_get_rmw_context(&support.context), 0);
+        if (executor_ready)
+            rclc_executor_fini(&executor);
+        if (lidar_timer_ready)
+            rcl_timer_fini(&timer_lidar);
+        if (imu_timer_ready)
+            rcl_timer_fini(&timer_imu);
+        if (lidar_publisher_ready && node_ready)
+            rcl_publisher_fini(&publisher_lidar, &node);
+        if (imu_publisher_ready && node_ready)
+            rcl_publisher_fini(&publisher_imu, &node);
+        if (node_ready)
+            rcl_node_fini(&node);
+        if (support_ready)
+            rclc_support_fini(&support);
+        if (init_options_ready)
+            rcl_init_options_fini(&init_options);
+        reset_session_state();
+        vTaskDelay(pdMS_TO_TICKS(AGENT_RECONNECT_DELAY_MS));
     }
-
-    rcl_node_t node;
-    RCCHECK(rclc_node_init_default(&node, "lidar_imu_publisher", ROS_NAMESPACE, &support));
-
-    RCCHECK(rclc_publisher_init_default(
-        &publisher_lidar,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, LaserScan),
-        "scan"));
-
-    RCCHECK(rclc_publisher_init_default(
-        &publisher_imu,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
-        "imu"));
-
-    RCCHECK(rclc_timer_init_default(
-        &timer_lidar,
-        &support,
-        RCL_MS_TO_NS(LIDAR_PUBLISH_PERIOD_MS),
-        timer_lidar_callback));
-
-    RCCHECK(rclc_timer_init_default(
-        &timer_imu,
-        &support,
-        RCL_MS_TO_NS(50),
-        timer_imu_callback));
-
-    rclc_executor_t executor;
-    RCCHECK(rclc_executor_init(&executor, &support.context, 2, &allocator));
-    RCCHECK(rclc_executor_add_timer(&executor, &timer_lidar));
-    RCCHECK(rclc_executor_add_timer(&executor, &timer_imu));
-
-    sync_time(TIME_SYNC_INITIAL_TIMEOUT_MS);
-
-    while (1)
-    {
-        rclc_executor_spin_some(&executor, RCL_MS_TO_NS(EXECUTOR_SPIN_TIMEOUT_MS));
-        maybe_sync_time();
-        usleep(1000);
-    }
-
-    RCCHECK(rcl_publisher_fini(&publisher_lidar, &node));
-    RCCHECK(rcl_publisher_fini(&publisher_imu, &node));
-    RCCHECK(rcl_node_fini(&node));
-
-    vTaskDelete(NULL);
 }
 
 void app_main(void)

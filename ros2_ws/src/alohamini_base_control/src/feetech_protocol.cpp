@@ -235,15 +235,29 @@ bool FeetechBus::writeAll(const std::vector<std::uint8_t> & data)
     return false;
   }
   std::size_t written = 0;
+  const auto deadline =
+    std::chrono::steady_clock::now() + std::chrono::milliseconds(write_timeout_ms_);
   while (written < data.size()) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      last_error_ = "serial write exceeded total timeout";
+      return false;
+    }
     ssize_t n = ::write(fd_, data.data() + written, data.size() - written);
     if (n < 0) {
       if (errno == EAGAIN || errno == EINTR) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+          last_error_ = "serial write timed out";
+          return false;
+        }
         std::this_thread::sleep_for(std::chrono::microseconds(100));
         continue;
       }
       last_error_ = std::string("write failed: ") + std::strerror(errno);
       return false;
+    }
+    if (n == 0) {
+      std::this_thread::sleep_for(std::chrono::microseconds(100));
+      continue;
     }
     written += static_cast<std::size_t>(n);
   }
@@ -253,6 +267,7 @@ bool FeetechBus::writeAll(const std::vector<std::uint8_t> & data)
 bool FeetechBus::readExact(std::size_t n, std::vector<std::uint8_t> & out, int timeout_ms)
 {
   if (fd_ < 0) {
+    last_error_ = "port not open";
     return false;
   }
   const auto deadline =
@@ -267,6 +282,7 @@ bool FeetechBus::readExact(std::size_t n, std::vector<std::uint8_t> & out, int t
       continue;
     }
     if (std::chrono::steady_clock::now() >= deadline) {
+      last_error_ = "serial read timed out";
       return false;
     }
     std::this_thread::sleep_for(std::chrono::microseconds(200));
@@ -427,7 +443,14 @@ bool FeetechBus::readPresentVelocityIndividually(
 {
   out.assign(ids.size(), 0);
   bool all_ok = true;
+  // Bound the entire multi-motor operation, not just every individual reply.
+  const auto deadline = std::chrono::steady_clock::now() +
+    std::chrono::milliseconds(timeout_ms_ * static_cast<int>(ids.size()));
   for (std::size_t k = 0; k < ids.size(); ++k) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      last_error_ = "individual velocity read exceeded total timeout";
+      return false;
+    }
     std::uint16_t raw_enc = 0;
     if (readWord(ids[k], reg::kPresentVelocity, raw_enc)) {
       out[k] = static_cast<std::int16_t>(decodeSignMagnitude(raw_enc, 15));

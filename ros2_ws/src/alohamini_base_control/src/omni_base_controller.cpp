@@ -13,6 +13,7 @@
 #include "alohamini_base_control/omni_base_controller.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <memory>
 #include <string>
@@ -54,6 +55,7 @@ controller_interface::CallbackReturn OmniBaseController::on_init()
     auto_declare<std::string>("base_frame", base_frame_);
     auto_declare<bool>("publish_tf", publish_tf_);
     auto_declare<bool>("use_stamped_vel", use_stamped_vel_);
+    auto_declare<double>("odom_publish_rate", odom_publish_rate_);
     auto_declare<double>("max_linear_speed", max_linear_speed_);
     auto_declare<double>("max_lateral_speed", max_lateral_speed_);
     auto_declare<double>("max_angular_speed", max_angular_speed_);
@@ -178,6 +180,7 @@ controller_interface::CallbackReturn OmniBaseController::on_configure(
   base_frame_ = node->get_parameter("base_frame").as_string();
   publish_tf_ = node->get_parameter("publish_tf").as_bool();
   use_stamped_vel_ = node->get_parameter("use_stamped_vel").as_bool();
+  odom_publish_rate_ = std::max(1.0, node->get_parameter("odom_publish_rate").as_double());
   max_linear_speed_ = node->get_parameter("max_linear_speed").as_double();
   max_lateral_speed_ = node->get_parameter("max_lateral_speed").as_double();
   max_angular_speed_ = node->get_parameter("max_angular_speed").as_double();
@@ -212,23 +215,33 @@ controller_interface::CallbackReturn OmniBaseController::on_configure(
       });
   }
 
+  // Odometry and dynamic TF are live streams: late subscribers must start from
+  // the newest sample instead of replaying stale state.  Explicit volatile,
+  // bounded QoS also prevents a slow RViz subscriber from growing a backlog.
+  const auto odom_qos = rclcpp::QoS(rclcpp::KeepLast(1))
+    .reliable()
+    .durability_volatile();
   odom_pub_ = node->create_publisher<nav_msgs::msg::Odometry>(
-    odom_topic_, rclcpp::SystemDefaultsQoS());
-  rt_odom_pub_ =
-    std::make_shared<realtime_tools::RealtimePublisher<nav_msgs::msg::Odometry>>(odom_pub_);
+    odom_topic_, odom_qos);
 
   if (publish_tf_) {
+    const auto tf_qos = rclcpp::QoS(rclcpp::KeepLast(5))
+      .reliable()
+      .durability_volatile();
     tf_pub_ = node->create_publisher<tf2_msgs::msg::TFMessage>(
-      "/tf", rclcpp::SystemDefaultsQoS());
-    rt_tf_pub_ =
-      std::make_shared<realtime_tools::RealtimePublisher<tf2_msgs::msg::TFMessage>>(tf_pub_);
+      "/tf", tf_qos);
   }
+  const auto publish_period = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::duration<double>(1.0 / odom_publish_rate_));
+  odom_publish_timer_ = node->create_wall_timer(
+    publish_period, std::bind(&OmniBaseController::publishOdometry, this));
 
   RCLCPP_INFO(
     node->get_logger(),
-    "OmniBaseController configured: wheels=[%s,%s,%s] r=%.3f R=%.3f, sub %s, pub %s",
+    "OmniBaseController configured: wheels=[%s,%s,%s] r=%.3f R=%.3f, sub %s, pub %s @ %.1f Hz",
     wheel_names_[0].c_str(), wheel_names_[1].c_str(), wheel_names_[2].c_str(),
-    wheel_radius_, base_radius_, cmd_vel_topic_.c_str(), odom_topic_.c_str());
+    wheel_radius_, base_radius_, cmd_vel_topic_.c_str(), odom_topic_.c_str(),
+    odom_publish_rate_);
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -238,6 +251,7 @@ controller_interface::CallbackReturn OmniBaseController::on_activate(
   odom_x_ = odom_y_ = odom_yaw_ = 0.0;
   last_cmd_time_ = get_node()->now();
   rt_cmd_.set(nullptr);
+  active_.store(true, std::memory_order_release);
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -248,6 +262,7 @@ controller_interface::CallbackReturn OmniBaseController::on_deactivate(
   for (auto & ci : command_interfaces_) {
     ci.set_value(0.0);
   }
+  active_.store(false, std::memory_order_release);
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -320,53 +335,86 @@ controller_interface::return_type OmniBaseController::update(
       std::sin(odom_yaw_ + vel.yaw * dt), std::cos(odom_yaw_ + vel.yaw * dt));
   }
 
-  // ---- 4. Publish odom + TF. ----
-  const double half = odom_yaw_ * 0.5;
+  // ---- 4. Update a lock-free snapshot. DDS publication is done by the
+  // non-realtime wall timer so network back-pressure cannot stall update(). ----
+  odom_snapshot_seq_.fetch_add(1, std::memory_order_acq_rel);  // odd: writing
+  odom_stamp_ns_.store(time.nanoseconds(), std::memory_order_relaxed);
+  published_x_.store(odom_x_, std::memory_order_relaxed);
+  published_y_.store(odom_y_, std::memory_order_relaxed);
+  published_yaw_.store(odom_yaw_, std::memory_order_relaxed);
+  published_vx_.store(vel.x, std::memory_order_relaxed);
+  published_vy_.store(vel.y, std::memory_order_relaxed);
+  published_wz_.store(vel.yaw, std::memory_order_relaxed);
+  odom_snapshot_seq_.fetch_add(1, std::memory_order_release);  // even: ready
+
+  return controller_interface::return_type::OK;
+}
+
+void OmniBaseController::publishOdometry()
+{
+  if (!active_.load(std::memory_order_acquire) || !odom_pub_) {
+    return;
+  }
+
+  std::int64_t stamp_ns;
+  double x, y, yaw, vx, vy, wz;
+  for (;;) {
+    const auto begin = odom_snapshot_seq_.load(std::memory_order_acquire);
+    if ((begin & 1U) != 0U) {
+      continue;
+    }
+    stamp_ns = odom_stamp_ns_.load(std::memory_order_relaxed);
+    x = published_x_.load(std::memory_order_relaxed);
+    y = published_y_.load(std::memory_order_relaxed);
+    yaw = published_yaw_.load(std::memory_order_relaxed);
+    vx = published_vx_.load(std::memory_order_relaxed);
+    vy = published_vy_.load(std::memory_order_relaxed);
+    wz = published_wz_.load(std::memory_order_relaxed);
+    if (begin == odom_snapshot_seq_.load(std::memory_order_acquire)) {
+      break;
+    }
+  }
+  if (stamp_ns <= 0) {
+    return;
+  }
+
+  const rclcpp::Time stamp(stamp_ns, RCL_ROS_TIME);
+  const double half = yaw * 0.5;
   const double qz = std::sin(half);
   const double qw = std::cos(half);
 
-  if (rt_odom_pub_ && rt_odom_pub_->trylock()) {
-    auto & odom = rt_odom_pub_->msg_;
-    odom.header.stamp = time;
-    odom.header.frame_id = odom_frame_;
-    odom.child_frame_id = base_frame_;
-    odom.pose.pose.position.x = odom_x_;
-    odom.pose.pose.position.y = odom_y_;
-    odom.pose.pose.position.z = 0.0;
-    odom.pose.pose.orientation.x = 0.0;
-    odom.pose.pose.orientation.y = 0.0;
-    odom.pose.pose.orientation.z = qz;
-    odom.pose.pose.orientation.w = qw;
-    odom.twist.twist.linear.x = vel.x;
-    odom.twist.twist.linear.y = vel.y;
-    odom.twist.twist.angular.z = vel.yaw;
-    odom.pose.covariance[0] = pose_cov_[0];
-    odom.pose.covariance[7] = pose_cov_[0];
-    odom.pose.covariance[35] = pose_cov_[1];
-    odom.twist.covariance[0] = twist_cov_[0];
-    odom.twist.covariance[7] = twist_cov_[0];
-    odom.twist.covariance[35] = twist_cov_[1];
-    rt_odom_pub_->unlockAndPublish();
-  }
+  nav_msgs::msg::Odometry odom;
+  odom.header.stamp = stamp;
+  odom.header.frame_id = odom_frame_;
+  odom.child_frame_id = base_frame_;
+  odom.pose.pose.position.x = x;
+  odom.pose.pose.position.y = y;
+  odom.pose.pose.orientation.z = qz;
+  odom.pose.pose.orientation.w = qw;
+  odom.twist.twist.linear.x = vx;
+  odom.twist.twist.linear.y = vy;
+  odom.twist.twist.angular.z = wz;
+  odom.pose.covariance[0] = pose_cov_[0];
+  odom.pose.covariance[7] = pose_cov_[0];
+  odom.pose.covariance[35] = pose_cov_[1];
+  odom.twist.covariance[0] = twist_cov_[0];
+  odom.twist.covariance[7] = twist_cov_[0];
+  odom.twist.covariance[35] = twist_cov_[1];
+  odom_pub_->publish(odom);
 
-  if (publish_tf_ && rt_tf_pub_ && rt_tf_pub_->trylock()) {
-    auto & tf_msg = rt_tf_pub_->msg_;
+  if (publish_tf_ && tf_pub_) {
+    tf2_msgs::msg::TFMessage tf_msg;
     tf_msg.transforms.resize(1);
-    auto & t = tf_msg.transforms[0];
-    t.header.stamp = time;
-    t.header.frame_id = odom_frame_;
-    t.child_frame_id = base_frame_;
-    t.transform.translation.x = odom_x_;
-    t.transform.translation.y = odom_y_;
-    t.transform.translation.z = 0.0;
-    t.transform.rotation.x = 0.0;
-    t.transform.rotation.y = 0.0;
-    t.transform.rotation.z = qz;
-    t.transform.rotation.w = qw;
-    rt_tf_pub_->unlockAndPublish();
+    auto & transform = tf_msg.transforms.front();
+    transform.header.stamp = stamp;
+    transform.header.frame_id = odom_frame_;
+    transform.child_frame_id = base_frame_;
+    transform.transform.translation.x = x;
+    transform.transform.translation.y = y;
+    transform.transform.rotation.z = qz;
+    transform.transform.rotation.w = qw;
+    tf_pub_->publish(tf_msg);
   }
-
-  return controller_interface::return_type::OK;
 }
 
 }  // namespace alohamini_base_control

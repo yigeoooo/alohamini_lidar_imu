@@ -57,17 +57,11 @@ std::vector<std::string> camera_device_candidates(const std::string &device)
 
   std::error_code ec;
   const fs::path configured_path(device);
-  if (fs::exists(configured_path, ec)) {
-    add_candidate(device);
-    const fs::path resolved = fs::weakly_canonical(configured_path, ec);
-    if (!ec && !resolved.empty()) {
-      add_candidate(resolved.string());
-    }
-  }
 
-  // Docker may expose /dev/video2 but omit the host's /dev/am_camera_* symlink.
-  // The V4L2 name is available in the shared sysfs tree and is more stable than
-  // relying on a hard-coded video number.
+  // Prefer the V4L2 name over the configured alias for am_camera_* devices.
+  // Docker resolves --device symlinks while creating a container, so after a
+  // reboot /dev/am_camera_forward inside an old container can still be the
+  // previous /dev/videoN.  The shared sysfs name follows the live enumeration.
   const std::string camera_name = configured_path.filename().string();
   if (camera_name.compare(0, 10, "am_camera_") == 0) {
     std::vector<fs::path> video_nodes;
@@ -97,6 +91,14 @@ std::vector<std::string> camera_device_candidates(const std::string &device)
     }
   }
 
+  if (fs::exists(configured_path, ec)) {
+    add_candidate(device);
+    const fs::path resolved = fs::weakly_canonical(configured_path, ec);
+    if (!ec && !resolved.empty()) {
+      add_candidate(resolved.string());
+    }
+  }
+
   // Keep retrying the configured path if the camera is hot-plugged after startup.
   if (candidates.empty()) {
     add_candidate(device);
@@ -116,12 +118,13 @@ public:
     image_topic_base_ = declare_parameter<std::string>("image_topic", "/head_camera/image_raw");
     device_ = declare_parameter<std::string>("device", "/dev/am_camera_forward");
     frame_id_ = declare_parameter<std::string>("frame_id", "head_camera");
-    fps_ = std::max(1.0, declare_parameter<double>("fps", 20.0));
+    pixel_format_ = declare_parameter<std::string>("pixel_format", "MJPG");
+    fps_ = std::max(1.0, declare_parameter<double>("fps", 10.0));
     width_ = declare_parameter<int>("width", 640);
     height_ = declare_parameter<int>("height", 480);
     jpeg_quality_ = static_cast<int>(
       std::clamp<long>(
-        declare_parameter<long>("jpeg_quality", 80L), 1L, 100L));
+        declare_parameter<long>("jpeg_quality", 70L), 1L, 100L));
     reconnect_period_sec_ = std::max(0.5, declare_parameter<double>("reconnect_period_sec", 2.0));
 
     publish_topic_ = ends_with(image_topic_base_, "/compressed")
@@ -129,10 +132,9 @@ public:
                        : image_topic_base_ + "/compressed";
 
     rclcpp::QoS qos(rclcpp::KeepLast(1));
-    // RViz's image_transport subscriber uses Reliable QoS by default.  A
-    // Best-Effort publisher would be incompatible with that subscriber, so
-    // keep the queue bounded but use Reliable for the compressed stream.
-    qos.reliable();
+    // Camera frames are ephemeral.  Best-effort + depth one prevents a slow
+    // Wi-Fi/RViz subscriber from applying reliable DDS back-pressure to the Pi.
+    qos.best_effort();
     publisher_ = create_publisher<sensor_msgs::msg::CompressedImage>(publish_topic_, qos);
 
     RCLCPP_INFO(
@@ -176,6 +178,12 @@ private:
       return;
     }
 
+    if (pixel_format_.size() == 4U) {
+      capture_.set(
+        cv::CAP_PROP_FOURCC,
+        cv::VideoWriter::fourcc(
+          pixel_format_[0], pixel_format_[1], pixel_format_[2], pixel_format_[3]));
+    }
     if (width_ > 0) {
       capture_.set(cv::CAP_PROP_FRAME_WIDTH, width_);
     }
@@ -188,10 +196,17 @@ private:
     const double actual_width = capture_.get(cv::CAP_PROP_FRAME_WIDTH);
     const double actual_height = capture_.get(cv::CAP_PROP_FRAME_HEIGHT);
     const double actual_fps = capture_.get(cv::CAP_PROP_FPS);
+    const int actual_fourcc = static_cast<int>(capture_.get(cv::CAP_PROP_FOURCC));
+    const std::string actual_pixel_format{
+      static_cast<char>(actual_fourcc & 0xff),
+      static_cast<char>((actual_fourcc >> 8) & 0xff),
+      static_cast<char>((actual_fourcc >> 16) & 0xff),
+      static_cast<char>((actual_fourcc >> 24) & 0xff)};
     RCLCPP_INFO(
       get_logger(),
-      "Opened %s (requested %s) at %.0fx%.0f @ %.1f fps",
-      active_device_.c_str(), device_.c_str(), actual_width, actual_height, actual_fps);
+      "Opened %s (requested %s) at %.0fx%.0f @ %.1f fps, format=%s",
+      active_device_.c_str(), device_.c_str(), actual_width, actual_height, actual_fps,
+      actual_pixel_format.c_str());
   }
 
   void tick()
@@ -243,11 +258,12 @@ private:
   std::string device_;
   std::string active_device_;
   std::string frame_id_;
-  double fps_{20.0};
+  std::string pixel_format_;
+  double fps_{10.0};
   double reconnect_period_sec_{2.0};
   int width_{640};
   int height_{480};
-  int jpeg_quality_{80};
+  int jpeg_quality_{70};
   cv::VideoCapture capture_;
   rclcpp::Time last_open_attempt_{0, 0, RCL_ROS_TIME};
   rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr publisher_;

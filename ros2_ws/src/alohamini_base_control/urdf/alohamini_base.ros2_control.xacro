@@ -51,6 +51,9 @@
         <param name="baud_rate">$(arg baud_rate)</param>
         <param name="max_wheel_raw">3000</param>
         <param name="configure_motors">true</param>
+        <param name="serial_timeout_ms">20</param>
+        <param name="reconnect_failure_threshold">5</param>
+        <param name="reconnect_backoff_ms">500</param>
       </xacro:unless>
     </hardware>
 

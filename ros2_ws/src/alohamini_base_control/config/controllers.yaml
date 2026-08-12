@@ -46,6 +46,9 @@ omni_base_controller:
     odom_frame: odom
     base_frame: base_footprint
     publish_tf: true
+    # DDS publication happens on a non-realtime timer at this rate; controller
+    # update/serial I/O remains at controller_manager.update_rate above.
+    odom_publish_rate: 25.0
     use_stamped_vel: false
 
     # Command watchdog: stop if no /cmd_vel within this window (matches host watchdog).

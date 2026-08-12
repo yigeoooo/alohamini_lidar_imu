@@ -92,6 +92,7 @@ public:
 
   // Open `port` at `baud` (default 1 Mbps) in raw mode. Returns false on failure.
   bool open(const std::string & port, int baud = 1000000);
+  void setTimeoutMs(int timeout_ms) { timeout_ms_ = timeout_ms > 0 ? timeout_ms : 1; }
   void close();
   bool isOpen() const { return fd_ >= 0; }
   const std::string & lastError() const { return last_error_; }
@@ -132,6 +133,7 @@ private:
   int fd_ = -1;
   std::string last_error_;
   int timeout_ms_ = 50;
+  int write_timeout_ms_ = 20;
 };
 
 }  // namespace alohamini_base_control

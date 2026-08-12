@@ -76,6 +76,13 @@ def build_mapping_command(args: argparse.Namespace) -> list[str]:
             f"baud_rate:={args.baud_rate}",
             f"use_mock_hardware:={str_bool(args.use_mock_hardware)}",
             f"base_yaw_deg:={args.base_yaw_deg}",
+            f"enable_head_camera:={str_bool(args.enable_head_camera)}",
+            f"head_camera_device:={args.head_camera_device}",
+            f"head_camera_fps:={args.head_camera_fps}",
+            f"head_camera_width:={args.head_camera_width}",
+            f"head_camera_height:={args.head_camera_height}",
+            f"head_camera_jpeg_quality:={args.head_camera_jpeg_quality}",
+            f"wait_for_time_sync:={str_bool(not args.no_wait_for_time_sync)}",
         ]
         if args.slam_params_file:
             cmd.append(f"slam_params_file:={args.slam_params_file}")
@@ -102,6 +109,12 @@ def build_mapping_command(args: argparse.Namespace) -> list[str]:
         f"require_observation_for_motion:={str_bool(args.require_observation_for_motion)}",
         "use_commanded_yaw_for_odom:=true",
         f"commanded_yaw_odom_scale:={args.commanded_yaw_odom_scale}",
+        f"enable_head_camera:={str_bool(args.enable_head_camera)}",
+        f"head_camera_device:={args.head_camera_device}",
+        f"head_camera_fps:={args.head_camera_fps}",
+        f"head_camera_width:={args.head_camera_width}",
+        f"head_camera_height:={args.head_camera_height}",
+        f"head_camera_jpeg_quality:={args.head_camera_jpeg_quality}",
     ]
     if args.slam_params_file:
         cmd.append(f"slam_params_file:={args.slam_params_file}")
@@ -235,6 +248,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--obs-port", default="5556", help="ZMQ observation port used only with --driver zmq")
     parser.add_argument("--map", default="/root/ws/maps/alohamini_map", help="Map output stem or .yaml path")
     parser.add_argument("--slam-params-file", default="", help="Optional slam_toolbox params file")
+    parser.add_argument("--enable-head-camera", action="store_true", help="Enable the low-load head camera stream.")
+    parser.add_argument("--head-camera-device", default="/dev/am_camera_forward")
+    parser.add_argument("--head-camera-fps", default="10.0")
+    parser.add_argument("--head-camera-width", default="640")
+    parser.add_argument("--head-camera-height", default="480")
+    parser.add_argument("--head-camera-jpeg-quality", default="70")
+    parser.add_argument(
+        "--no-wait-for-time-sync",
+        action="store_true",
+        help="Bypass the NTP startup gate only when the Pi clock is already known to be correct.",
+    )
     parser.add_argument("--linear-x-scale", default="1.0")
     parser.add_argument("--linear-y-scale", default="1.0")
     parser.add_argument("--angular-z-scale", default="1.0")
