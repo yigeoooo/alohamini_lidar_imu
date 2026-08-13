@@ -58,7 +58,6 @@ alohamini_lidar_imu/
 ```bash
 cd /path/to/alohamini_lidar_imu
 
-rm -rf extra_components/micro_ros_espidf_component/micro_ros_dev
 rm -rf extra_components/micro_ros_espidf_component/micro_ros_src/build
 rm -rf extra_components/micro_ros_espidf_component/micro_ros_src/install
 rm -rf extra_components/micro_ros_espidf_component/micro_ros_src/log
