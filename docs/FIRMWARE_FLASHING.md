@@ -108,5 +108,15 @@ idf.py menuconfig
 cd /path/to/alohamini_lidar_imu/firmware/lidar_imu_publisher
 idf.py build flash
 ```
+
+### 3. 板子测试
+
+进入路径，串口模拟板子运行
+
+```bash
+cd /path/to/alohamini_lidar_imu/firmware/lidar_imu_publisher
+idf.py monitor -p /dev/ttyUSB0
+```
+
 完成后，Micro Ros板子所需要的代码就烧录完成了
 
