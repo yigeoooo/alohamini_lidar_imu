@@ -81,10 +81,6 @@ q           不保存，停止建图 launch 并退出
 Ctrl+C      不保存，停止建图 launch 并退出
 ```
 
-
-
-
-```
 rviz界面看到以下参考图片，则说明成功（rviz可视化参考第七章）
 
 ![rviz建图](./image/5.png)
