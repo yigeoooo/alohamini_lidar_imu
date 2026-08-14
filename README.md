@@ -76,7 +76,3 @@ ros2_ws/src/alohamini_description/urdf/alohamini_nav.urdf
   <origin xyz="X Y Z" rpy="ROLL PITCH YAW" />
 </joint>
 ```
-
-## 必要说明
-
-extra_components文件夹下的为烧录代码时所需要的三方依赖，为独立的代码仓库。暂时不放置在本仓库

@@ -34,37 +34,18 @@ cd esp-idf
 ./install.sh esp32s3
 ```
 
-### 4. 放置 extra_components 依赖
+### 4.  extra_components 依赖
 
-`extra_components` 是 `lidar_imu_publisher` 固件编译时使用的 micro-ROS 组件。收到 `extra_components.zip` 后，将它解压到 `alohamini_lidar_imu` 项目根目录：
-
-```bash
-cd /path/to/alohamini_lidar_imu
-unzip /path/to/extra_components.zip
-```
-
-`/path/to/alohamini_lidar_imu` 和 `/path/to/extra_components.zip` 需要替换成接收方电脑上的实际路径。解压后必须保持以下目录结构：
-
-```text
-alohamini_lidar_imu/
-├── extra_components/
-│   └── micro_ros_espidf_component/
-└── firmware/
-    └── lidar_imu_publisher/
-```
-
-压缩包中可能包含原电脑生成的编译文件。接收方第一次编译前，建议执行以下命令清理其中的本机绝对路径，同时保留已经下载的 micro-ROS 源码：
+压缩包中可能包含原电脑生成的编译文件。接收方第一次编译前，建议执行以下命令清理构建产物
 
 ```bash
 cd /path/to/alohamini_lidar_imu
 
-rm -rf extra_components/micro_ros_espidf_component/micro_ros_src/build
-rm -rf extra_components/micro_ros_espidf_component/micro_ros_src/install
-rm -rf extra_components/micro_ros_espidf_component/micro_ros_src/log
+rm -rf extra_components/micro_ros_espidf_component/micro_ros_src
+rm -rf extra_components/micro_ros_espidf_component/micro_ros_dev
 rm -rf extra_components/micro_ros_espidf_component/include
 rm -f extra_components/micro_ros_espidf_component/libmicroros.a
 rm -f extra_components/micro_ros_espidf_component/esp32_toolchain.cmake
-rm -rf firmware/lidar_imu_publisher/build
 ```
 
 ## 激活ESP-IDF开发环境
@@ -81,6 +62,8 @@ source ~/esp/esp-idf/export.sh
 将microROS控制板连接到本机电脑的usb口，并进入本项目的/alohamini_lidar_imu/firmware/lidar_imu_publisher位置（若未激活开发环境，则运行命令激活环境。具体参考激活ESP-IDF开发环境）
 
 ### 1. 打开ESP-IDF的配置工具。
+
+<b>注意: 此步骤在国内需要vpn，第一次构建的时候会从github拉取相关依赖，注意网络通畅，不然会失败</b>
 
 ```bash
 idf.py menuconfig

@@ -21,5 +21,6 @@ ros2_ws/maps/
 firmware/lidar_imu_publisher/sdkconfig
 firmware/lidar_imu_publisher/sdkconfig.old
 
-extra_components/*
-
+# Three-party dependency construction
+extra_components/micro_ros_espidf_component/include
+extra_components/micro_ros_espidf_component/libmicroros.a
