@@ -93,12 +93,16 @@ idf.py build flash
 
 ### 3. 板子测试
 
-进入路径，串口模拟板子运行
+1. 将micro ros开发板连接好雷达后，usb线一头连开发板串口，一头连本地主机PC
+2. 开启树莓派端的micro-ROS Agent代理，若不开启跳过此步骤，测试的时候会报错，等待某IP（树莓派端IP）agent开启，是正常现象。micro-ROS Agent开启参考[工作流程](./WORKFLOW.md)文档第一步
+3. 进入路径，串口模拟板子运行
 
-```bash
-cd /path/to/alohamini_lidar_imu/firmware/lidar_imu_publisher
-idf.py monitor -p /dev/ttyUSB0
-```
+    ```bash
+    cd /path/to/alohamini_lidar_imu/firmware/lidar_imu_publisher
+    idf.py monitor -p /dev/ttyUSB0
+    ```
+
+4. ctrl + ] 退出模拟
 
 完成后，Micro Ros板子所需要的代码就烧录完成了
 
